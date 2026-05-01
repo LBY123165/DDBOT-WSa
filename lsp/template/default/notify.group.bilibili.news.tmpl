@@ -137,7 +137,7 @@
                 {{ printf "%v\n" $v.Ele -}}
             {{ else if eq $v.Type "image" -}}
                 {{ pic $v.Ele -}}
-                {{ if ne $v.Desc "" -}}
+                {{ if and (ne $v.Desc "") (ne $v.Desc "top__album__cover") -}}
                     {{ printf "%v\n" $v.Desc -}}
                 {{ end -}}
             {{ else if eq $v.Type "collection" -}}

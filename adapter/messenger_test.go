@@ -1561,7 +1561,7 @@ func TestCountImages(t *testing.T) {
 func TestIsSingleElement(t *testing.T) {
 	tests := []struct {
 		segmentType string
-		expected   bool
+		expected    bool
 	}{
 		{"text", false},
 		{"at", false},
@@ -1580,115 +1580,6 @@ func TestIsSingleElement(t *testing.T) {
 			seg := MessageSegment{Type: tt.segmentType}
 			result := isSingleElement(seg)
 			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
-
-// TestSplitTextSmart tests intelligent text splitting.
-func TestSplitTextSmart(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected int // number of parts
-	}{
-		{
-			name:     "short text",
-			input:    "hello world",
-			expected: 1,
-		},
-		{
-			name:     "multiple lines under limit",
-			input:    "line1\nline2\nline3",
-			expected: 1, // total 15 chars < 4500
-		},
-		{
-			name:     "line splitting",
-			input:    "line1\n" + strings.Repeat("a", 5000) + "\nline3",
-			expected: 3, // line1 (5) + 5000 a's split into 2 chunks + line3 (5)
-		},
-		{
-			name:     "punctuation splitting",
-			input:    strings.Repeat("a", 3000) + "。" + strings.Repeat("b", 3000) + "。" + strings.Repeat("c", 3000),
-			expected: 3, // 3000a+。 + 2999b+。 + 3000c
-		},
-		{
-			name:     "hard cut when no punctuation",
-			input:    strings.Repeat("x", 10000),
-			expected: 3, // 4500 + 4500 + 1000
-		},
-		{
-			name:     "mixed line and punctuation",
-			input:    "line1\n" + strings.Repeat("a", 3000) + "。" + strings.Repeat("b", 3000) + "。" + strings.Repeat("c", 3000),
-			expected: 3, // \n at 5 is closer than 。at 3006, so prefer \n
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := splitTextSmart(tt.input)
-			assert.Len(t, result, tt.expected, "split should produce expected number of parts")
-			// Verify each part is under limit
-			for i, part := range result {
-				assert.LessOrEqual(t, len(part), MaxTextLength, "part %d should be under limit", i)
-			}
-			// Verify total text content is preserved
-			// Each part should contain the same characters as the original lines
-			var totalLen int
-			for _, part := range result {
-				totalLen += len(part)
-			}
-			// The total should be close to original (accounting for added newlines when splitting long lines)
-			// Just verify it's not grossly different
-			assert.Greater(t, totalLen, len(tt.input)-10, "total text length should be preserved")
-		})
-	}
-}
-
-// TestSplitLongLine tests long line splitting with punctuation.
-func TestSplitLongLine(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected int
-	}{
-		{
-			name:     "under limit",
-			input:    "short line",
-			expected: 1,
-		},
-		{
-			name:     "punctuation split",
-			input:    strings.Repeat("a", 3000) + "。" + strings.Repeat("b", 3000),
-			expected: 2,
-		},
-		{
-			name:     "multiple punctuation",
-			input:    strings.Repeat("a", 2000) + "。" + strings.Repeat("b", 2000) + "！" + strings.Repeat("c", 2000),
-			expected: 2, // split at last punctuation within limit (position 4001), remaining 2001 chars < limit
-		},
-		{
-			name:     "no punctuation hard cut",
-			input:    strings.Repeat("x", 10000),
-			expected: 3,
-		},
-		{
-			name:     "chinese punctuation",
-			input:    strings.Repeat("a", 2000) + "，" + strings.Repeat("b", 2000) + "，" + strings.Repeat("c", 2000),
-			expected: 2, // split at last punctuation within limit (position 4001), remaining 2001 chars < limit
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := splitLongLine(tt.input)
-			assert.Len(t, result, tt.expected, "split should produce expected number of parts")
-			// Verify each part is under limit
-			for i, part := range result {
-				assert.LessOrEqual(t, len(part), MaxTextLength, "part %d length=%d should be under limit", i, len(part))
-			}
-			// Verify concatenation reconstructs original
-			reconstructed := strings.Join(result, "")
-			assert.Equal(t, tt.input, reconstructed, "should reconstruct original text")
 		})
 	}
 }

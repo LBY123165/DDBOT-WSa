@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
@@ -494,7 +495,7 @@ func calculateTextLength(segments []MessageSegment) int {
 		switch seg.Type {
 		case "text":
 			if text, ok := seg.Data["text"].(string); ok {
-				length += len(text)
+				length += utf8.RuneCountInString(text)
 			}
 		case "at":
 			length += estimateAtLength
@@ -518,15 +519,24 @@ func countImages(segments []MessageSegment) int {
 	return count
 }
 
-// splitTextSmart 智能拆分长文本
-// 从文本开头开始查找合适的切割点：优先\n，其次标点，最后直接切
-func splitTextSmart(text string) []string {
-	// 如果本身就小于限制，直接返回
-	if len(text) <= MaxTextLength {
-		return []string{text}
+type textSplitPart struct {
+	Text string
+	Hard bool
+}
+
+// splitTextSmartWithLimit 智能拆分文本，限制第一段长度不超过 limit
+// 在 limit 范围内查找最佳切分点：优先\n，其次标点，最后硬切
+func splitTextSmartWithLimit(text string, limit int) textSplitPart {
+	if limit <= 0 {
+		return textSplitPart{Hard: true}
 	}
 
-	var result []string
+	runes := []rune(text)
+	textLen := len(runes)
+
+	if textLen <= limit {
+		return textSplitPart{Text: text}
+	}
 
 	// 标点符号列表（中日英）
 	punctList := []string{
@@ -534,121 +544,63 @@ func splitTextSmart(text string) []string {
 		".", "!", "?", ",", ";", ":", "-", "…",
 	}
 
-	offset := 0
-	for offset < len(text) {
-		remaining := text[offset:]
-		if len(remaining) <= MaxTextLength {
-			// 最后一段，直接加入
-			result = append(result, remaining)
-			break
-		}
+	const newlineThreshold = 100
 
-		// 在 MaxTextLength 范围内查找切割点
-		searchEnd := MaxTextLength
-		if searchEnd > len(remaining) {
-			searchEnd = len(remaining)
-		}
+	searchEnd := limit
+	if searchEnd > textLen {
+		searchEnd = textLen
+	}
 
-		// 正着找\n（找最后一个不超限的）
-		newlinePos := -1
-		for i := 0; i < searchEnd; i++ {
-			if remaining[i] == '\n' {
-				newlinePos = i
-			}
+	newlinePos := -1
+	for i := 0; i < searchEnd; i++ {
+		if runes[i] == '\n' {
+			newlinePos = i
 		}
+	}
 
-		// 找标点（找最后一个不超限的）
+	cutPos := -1
+	if newlinePos > 0 && (limit-newlinePos) <= newlineThreshold {
+		cutPos = newlinePos
+	} else {
 		punctPos := -1
 		for _, punct := range punctList {
-			idx := strings.Index(remaining[:searchEnd], punct)
-			if idx >= 0 {
-				pos := idx + len(punct)
-				if pos <= MaxTextLength && pos > punctPos {
-					punctPos = pos
+			punctRunes := []rune(punct)
+			plen := len(punctRunes)
+			for i := 0; i <= searchEnd-plen; i++ {
+				found := true
+				for j := range punctRunes {
+					if runes[i+j] != punctRunes[j] {
+						found = false
+						break
+					}
+				}
+				if found {
+					pos := i + plen
+					if pos <= limit && pos > punctPos {
+						punctPos = pos
+					}
 				}
 			}
 		}
 
-		// 决定切割位置
-		cutPos := -1
-		if punctPos > 0 && newlinePos > 0 {
-			// 两者都有，选择更接近4500的
-			if MaxTextLength-punctPos <= MaxTextLength-newlinePos {
+		if newlinePos > 0 && punctPos > 0 {
+			if limit-punctPos <= limit-newlinePos {
 				cutPos = punctPos
 			} else {
 				cutPos = newlinePos
 			}
-		} else if newlinePos > 0 {
-			cutPos = newlinePos
 		} else if punctPos > 0 {
 			cutPos = punctPos
-		}
-
-		// 执行切割
-		if cutPos > 0 {
-			result = append(result, remaining[:cutPos])
-			offset += cutPos + 1
-		} else {
-			// 找不到合适位置，直接在4500处切断
-			result = append(result, remaining[:MaxTextLength])
-			offset += MaxTextLength
+		} else if newlinePos > 0 {
+			cutPos = newlinePos
 		}
 	}
 
-	return result
-}
-
-// splitLongLine 拆分过长的单行
-// 优先按标点符号拆分，其次在任意位置切断
-func splitLongLine(line string) []string {
-	var result []string
-
-	// 标点符号列表（中日英）
-	punctuation := []string{
-		"。", "！", "？", "，", "、", "；", "：", "——", "…",
-		".", "!", "?", ",", ";", ":", "-", "…",
+	if cutPos > 0 {
+		return textSplitPart{Text: strings.TrimRight(string(runes[:cutPos]), "\n")}
 	}
 
-	// 2. 尝试按标点符号拆分
-	remaining := line
-	for len(remaining) > MaxTextLength {
-		found := false
-		bestPos := -1
-
-		// 找到所有标点位置，选择最后一个不超过限制的
-		for _, punct := range punctuation {
-			idx := strings.LastIndex(remaining[:MaxTextLength], punct)
-			if idx > 0 {
-				pos := idx + len(punct)
-				if pos <= MaxTextLength && pos > bestPos {
-					bestPos = pos
-				}
-			}
-		}
-
-		if bestPos > 0 {
-			result = append(result, remaining[:bestPos])
-			remaining = remaining[bestPos:]
-			found = true
-		}
-
-		if !found {
-			break
-		}
-	}
-
-	// 3. 如果还有剩余，直接按长度切断
-	if len(remaining) > 0 {
-		for len(remaining) > MaxTextLength {
-			result = append(result, remaining[:MaxTextLength])
-			remaining = remaining[MaxTextLength:]
-		}
-		if remaining != "" {
-			result = append(result, remaining)
-		}
-	}
-
-	return result
+	return textSplitPart{Text: string(runes[:limit]), Hard: true}
 }
 
 // buildMessageChunks 将消息拆分为多个分片，每个分片符合发送限制
@@ -656,20 +608,19 @@ func splitLongLine(line string) []string {
 // 1. 文本长度不超过 MaxTextLength (4500)
 // 2. 图片不超过 MaxImageCount (20)
 // 3. 独立类型(video/file/record/forward)必须单独发送
+// 4. 可组合类型尽量组合，直到超过限制才分片
 func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageSegment {
 	segments := m.buildMessageSegments(msg)
 
-	// 预分配 slices，避免重复分配内存
-	// 大多数情况下消息不会超过10个分片
 	chunks := make([][]MessageSegment, 0, 10)
 	var currentChunk []MessageSegment
 	currentTextLen := 0
 	currentImageCount := 0
 
-	flushChunk := func() {
+	flush := func() {
 		if len(currentChunk) > 0 {
 			chunks = append(chunks, currentChunk)
-			currentChunk = currentChunk[:0] // reuse underlying array
+			currentChunk = nil
 			currentTextLen = 0
 			currentImageCount = 0
 		}
@@ -677,57 +628,76 @@ func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageS
 
 	for _, seg := range segments {
 		if isSingleElement(seg) {
-			// 独立类型：先提交当前 chunk，然后单独成一条消息
-			flushChunk()
+			flush()
 			chunks = append(chunks, []MessageSegment{seg})
 			continue
 		}
 
-		// 可组合类型：检查是否超过限制
-		segTextLen := 0
-		segImageCount := 0
-
 		switch seg.Type {
 		case "text":
-			if text, ok := seg.Data["text"].(string); ok {
-				segTextLen = len(text)
-			}
-		case "at", "reply", "face":
-			segTextLen = estimateAtLength // 使用常量代替 magic number
-		case "image":
-			segImageCount = 1
-		}
+			text := getString(seg.Data["text"])
+			textLen := utf8.RuneCountInString(text)
 
-		// 如果单个文本元素就超过限制，使用智能拆分
-		if seg.Type == "text" {
-			if text, ok := seg.Data["text"].(string); ok && len(text) > MaxTextLength {
-				flushChunk()
-				// 智能拆分文本（按行、标点、最后才切断）
-				textParts := splitTextSmart(text)
-				for _, part := range textParts {
-					chunks = append(chunks, []MessageSegment{{
+			for textLen > 0 {
+				available := MaxTextLength - currentTextLen
+
+				if available <= 0 {
+					flush()
+					continue
+				}
+
+				if textLen <= available {
+					// 文本可以直接放入
+					currentChunk = append(currentChunk, MessageSegment{
+						Type: "text",
+						Data: map[string]interface{}{"text": text},
+					})
+					currentTextLen += textLen
+					break
+				} else {
+					// 文本需要切分，使用智能切片
+					split := splitTextSmartWithLimit(text, available)
+					part := split.Text
+					if part == "" {
+						flush()
+						continue
+					}
+
+					currentChunk = append(currentChunk, MessageSegment{
 						Type: "text",
 						Data: map[string]interface{}{"text": part},
-					}})
+					})
+					currentTextLen += utf8.RuneCountInString(part)
+					flush()
+
+					remainderRunes := []rune(text)[utf8.RuneCountInString(part):]
+					remainder := string(remainderRunes)
+					if !split.Hard {
+						remainder = strings.TrimLeft(remainder, "\n")
+					}
+					text = remainder
+					textLen = utf8.RuneCountInString(text)
 				}
-				continue
 			}
+
+		case "image":
+			if currentImageCount >= MaxImageCount {
+				flush()
+			}
+			currentChunk = append(currentChunk, seg)
+			currentImageCount++
+
+		case "at", "reply", "face":
+			estLen := estimateAtLength
+			if currentTextLen+estLen > MaxTextLength {
+				flush()
+			}
+			currentChunk = append(currentChunk, seg)
+			currentTextLen += estLen
 		}
-
-		// 检查是否超过限制
-		exceedsText := currentTextLen+segTextLen > MaxTextLength
-		exceedsImage := currentImageCount+segImageCount > MaxImageCount
-
-		if exceedsText || exceedsImage {
-			flushChunk()
-		}
-
-		currentChunk = append(currentChunk, seg)
-		currentTextLen += segTextLen
-		currentImageCount += segImageCount
 	}
 
-	flushChunk()
+	flush()
 	return chunks
 }
 
