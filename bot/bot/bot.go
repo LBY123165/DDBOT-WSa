@@ -2,9 +2,6 @@ package bot
 
 import (
 	"fmt"
-	"io"
-	"net/http"
-	"os"
 	"sync"
 	"time"
 
@@ -16,7 +13,6 @@ import (
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/atomic"
-	"gopkg.ilharper.com/x/isatty"
 )
 
 var reloginLock = new(sync.Mutex)
@@ -403,45 +399,14 @@ func refreshList() {
 }
 
 func Login() {
-	// 不需要登录，因为使用适配器
 	logger.Info("Adapter mode: no login required")
 }
-
-var deviceInfo interface{}
 
 func UseDevice(device []byte) error {
 	return nil
 }
 
 func GenRandomDevice() {
-}
-
-var remoteVersions = map[int]string{
-	1: "https://raw.githubusercontent.com/RomiChan/protocol-versions/master/android_phone.json",
-	6: "https://raw.githubusercontent.com/RomiChan/protocol-versions/master/android_pad.json",
-}
-
-func getRemoteLatestProtocolVersion(protocolType int) ([]byte, error) {
-	url, ok := remoteVersions[protocolType]
-	if !ok {
-		return nil, fmt.Errorf("remote version unavailable")
-	}
-	resp, err := http.Get(url)
-	if err != nil {
-		resp, err = http.Get("https://ghproxy.com/" + url)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return io.ReadAll(resp.Body)
-}
-
-func readIfTTY(de string) (str string) {
-	if isatty.Isatty(os.Stdin.Fd()) {
-		return readLine()
-	}
-	logger.Warnf("未检测到输入终端，自动选择%s.", de)
-	return de
 }
 
 func RefreshList() {
