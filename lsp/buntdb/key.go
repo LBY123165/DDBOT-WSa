@@ -194,6 +194,9 @@ func XHHSmidV2Key(keys ...interface{}) string {
 func XHHSmidV2GenerateTimeKey(keys ...interface{}) string {
 	return NamedKey("XHHSmidV2GenerateTime", keys)
 }
+func WeiboCookieAlertKey(keys ...interface{}) string {
+	return NamedKey("WeiboCookieAlert", keys)
+}
 func TwitterUserInfoKey(keys ...interface{}) string {
 	return NamedKey("TwitterUserInfo", keys)
 }

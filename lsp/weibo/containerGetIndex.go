@@ -70,6 +70,23 @@ func apiContainerGetIndexProfileAPI(uid int64) (*ApiContainerGetIndexProfileResp
 	profileResp := new(ApiContainerGetIndexProfileResponse)
 	err := requests.Get(apiURL, nil, &profileResp)
 	if err != nil {
+		if isCookieFailure(err) {
+			logger.Warnf("uid=%d: 检测到Cookie失效，尝试刷新并重试ApiContainerGetIndexProfile", uid)
+			if ForceFreshCookie() {
+				var retryOpts []requests.Option
+				retryOpts = append(retryOpts,
+					requests.ProxyOption(proxy_pool.PreferNone),
+					requests.AddUAOption(),
+					requests.TimeoutOption(time.Second*10),
+				)
+				retryOpts = append(retryOpts, CookieOption()...)
+				profileResp = new(ApiContainerGetIndexProfileResponse)
+				if retryErr := requests.Get(apiURL, nil, &profileResp, retryOpts...); retryErr == nil {
+					logger.Infof("uid=%d: Cookie刷新成功，ApiContainerGetIndexProfile重试成功", uid)
+					return profileResp, nil
+				}
+			}
+		}
 		return nil, err
 	}
 	return profileResp, nil
@@ -161,6 +178,23 @@ func apiContainerGetIndexCardsAPI(uid int64) (*ApiContainerGetIndexCardsResponse
 	cardsResp := new(ApiContainerGetIndexCardsResponse)
 	err := requests.Get(apiURL, nil, &cardsResp)
 	if err != nil {
+		if isCookieFailure(err) {
+			logger.Warnf("uid=%d: 检测到Cookie失效，尝试刷新并重试ApiContainerGetIndexCards", uid)
+			if ForceFreshCookie() {
+				var retryOpts []requests.Option
+				retryOpts = append(retryOpts,
+					requests.ProxyOption(proxy_pool.PreferNone),
+					requests.AddUAOption(),
+					requests.TimeoutOption(time.Second*10),
+				)
+				retryOpts = append(retryOpts, CookieOption()...)
+				cardsResp = new(ApiContainerGetIndexCardsResponse)
+				if retryErr := requests.Get(apiURL, nil, &cardsResp, retryOpts...); retryErr == nil {
+					logger.Infof("uid=%d: Cookie刷新成功，ApiContainerGetIndexCards重试成功", uid)
+					return cardsResp, nil
+				}
+			}
+		}
 		return nil, err
 	}
 	return cardsResp, nil
@@ -308,4 +342,14 @@ func CreateGuestReferer(uid int64) string {
 
 func isGuestMode() bool {
 	return strings.EqualFold(cfg.GetWeiboMode(), "guest")
+}
+
+// isCookieFailure 判断是否是 Cookie 失效导致的错误（API 返回了 HTML）
+func isCookieFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "invalid character '<'") ||
+		strings.Contains(msg, "looking for beginning of value")
 }

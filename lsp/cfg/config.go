@@ -235,6 +235,11 @@ func GetWeiboAutoRefresh() bool {
 	return config.GlobalConfig.GetBool("weibo.autorefresh")
 }
 
+// GetWeiboAlertGroupId 获取 Cookie 告警通知的目标群号，0 表示不发群
+func GetWeiboAlertGroupId() int64 {
+	return config.GlobalConfig.GetInt64("weibo.alertGroupId")
+}
+
 func GetHeyboxToken() string {
 	return strings.TrimSpace(config.GlobalConfig.GetString("heybox.x_xhh_tokenid"))
 }
