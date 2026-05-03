@@ -3,8 +3,8 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	tc "github.com/cnxysoft/DDBOT-WSa/internal/test_concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
@@ -253,7 +253,7 @@ func TestIGrantRole(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), "未找到用户")
 
-	localutils.GetBot().TESTAddMember(test.G1, test.UID2, client.Member)
+	localutils.GetBot().TESTAddMember(test.G1, test.UID2, adapter.Member)
 
 	IGrantRole(ctx, test.G1, permission.GroupAdmin, test.UID2, false)
 	result = <-msgChan
@@ -316,7 +316,7 @@ func TestIGrantCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), "未找到用户")
 
-	localutils.GetBot().TESTAddMember(test.G1, test.Sender2.Uin, client.Member)
+	localutils.GetBot().TESTAddMember(test.G1, test.Sender2.Uin, adapter.Member)
 
 	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, false)
 	result = <-msgChan
@@ -545,13 +545,13 @@ func TestIConfigAtCmd(t *testing.T) {
 	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), failed)
 
 	localutils.GetBot().TESTAddGroup(test.G1)
-	localutils.GetBot().TESTAddMember(test.G1, test.UID1, client.Member)
+	localutils.GetBot().TESTAddMember(test.G1, test.UID1, adapter.Member)
 
 	IConfigAtCmd(ctx, test.G1, test.NAME1, test.Site1, test.T1, "add", []int64{test.UID1, test.UID2})
 	result = <-msgChan
 	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), failed)
 
-	localutils.GetBot().TESTAddMember(test.G1, test.UID2, client.Member)
+	localutils.GetBot().TESTAddMember(test.G1, test.UID2, adapter.Member)
 
 	IConfigAtCmd(ctx, test.G1, test.NAME1, test.Site1, test.T1, "add", []int64{test.UID1, test.UID2})
 	result = <-msgChan

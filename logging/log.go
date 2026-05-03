@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
@@ -135,7 +134,7 @@ func logPrivateMessage(msg *message.PrivateMessage) {
 	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.Uin, msgstringer.MsgToString(msg.Elements), msg.Id)
 }
 
-func logFriendMessageRecallEvent(event *client.FriendMessageRecalledEvent) {
+func logFriendMessageRecallEvent(event *adapter.FriendMessageRecalledEvent) {
 	logger.WithFields(logrus.Fields{
 		"From":      "FriendsMessageRecall",
 		"MessageID": event.MessageId,
@@ -143,7 +142,7 @@ func logFriendMessageRecallEvent(event *client.FriendMessageRecalledEvent) {
 	}).Info("好友消息撤回")
 }
 
-func logGroupMessageRecallEvent(event *client.GroupMessageRecalledEvent) {
+func logGroupMessageRecallEvent(event *adapter.GroupMessageRecalledEvent) {
 	logger.WithFields(localutils.GroupLogFields(event.GroupCode)).
 		WithFields(logrus.Fields{
 			"From":       "GroupMessageRecall",
@@ -153,7 +152,7 @@ func logGroupMessageRecallEvent(event *client.GroupMessageRecalledEvent) {
 		}).Info("群消息撤回")
 }
 
-func logGroupMuteEvent(event *client.GroupMuteEvent) {
+func logGroupMuteEvent(event *adapter.GroupMuteEvent) {
 	muteLogger := logger.WithFields(localutils.GroupLogFields(event.GroupCode)).
 		WithFields(logrus.Fields{
 			"From":        "GroupMute",
@@ -187,7 +186,7 @@ func logGroupMuteEvent(event *client.GroupMuteEvent) {
 	}
 }
 
-func logDisconnect(event *client.ClientDisconnectedEvent) {
+func logDisconnect(event *adapter.ClientDisconnectedEvent) {
 	logger.WithFields(logrus.Fields{
 		"From":   "Disconnected",
 		"Reason": event.Message,
@@ -195,27 +194,27 @@ func logDisconnect(event *client.ClientDisconnectedEvent) {
 }
 
 func registerLog(b *bot.Bot) {
-	b.GroupMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMessageRecalledEvent) {
+	b.GroupMessageRecalledEvent.Subscribe(func(event *adapter.GroupMessageRecalledEvent) {
 		logGroupMessageRecallEvent(event)
 	})
 
-	b.GroupMessageEvent.Subscribe(func(qqClient *client.QQClient, groupMessage *message.GroupMessage) {
+	b.GroupMessageEvent.Subscribe(func(groupMessage *message.GroupMessage) {
 		logGroupMessage(groupMessage)
 	})
 
-	b.GroupMuteEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMuteEvent) {
+	b.GroupMuteEvent.Subscribe(func(event *adapter.GroupMuteEvent) {
 		logGroupMuteEvent(event)
 	})
 
-	b.PrivateMessageEvent.Subscribe(func(qqClient *client.QQClient, privateMessage *message.PrivateMessage) {
+	b.PrivateMessageEvent.Subscribe(func(privateMessage *message.PrivateMessage) {
 		logPrivateMessage(privateMessage)
 	})
 
-	b.FriendMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.FriendMessageRecalledEvent) {
+	b.FriendMessageRecalledEvent.Subscribe(func(event *adapter.FriendMessageRecalledEvent) {
 		logFriendMessageRecallEvent(event)
 	})
 
-	b.DisconnectedEvent.Subscribe(func(qqClient *client.QQClient, event *client.ClientDisconnectedEvent) {
+	b.DisconnectedEvent.Subscribe(func(event *adapter.ClientDisconnectedEvent) {
 		logDisconnect(event)
 	})
 

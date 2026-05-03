@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
@@ -17,41 +16,34 @@ import (
 )
 
 type BotEventDispatcher interface {
-	// Existing methods
 	DispatchGroupMessage(msg *message.GroupMessage)
 	DispatchPrivateMessage(msg *message.PrivateMessage)
-	DispatchGroupRecall(event *client.GroupMessageRecalledEvent)
-	DispatchFriendRecall(event *client.FriendMessageRecalledEvent)
-	DispatchGroupMute(event *client.GroupMuteEvent)
-	DispatchDisconnected(event *client.ClientDisconnectedEvent)
-
-	// New methods - Notice events
-	DispatchGroupMemberJoin(event *client.MemberJoinGroupEvent)
-	DispatchGroupMemberLeave(event *client.MemberLeaveGroupEvent)
-	DispatchGroupJoin(event *client.GroupInfo)
-	DispatchGroupLeave(event *client.GroupLeaveEvent)
-	DispatchGroupMemberPermissionChanged(event *client.MemberPermissionChangedEvent)
-	DispatchMemberCardUpdated(event *client.MemberCardUpdatedEvent)
-	DispatchMemberSpecialTitleUpdated(event *client.MemberSpecialTitleUpdatedEvent)
-	DispatchGroupUploadNotify(event *client.GroupUploadNotifyEvent)
-	DispatchGroupNotify(event client.INotifyEvent)
-	DispatchFriendNotify(event client.INotifyEvent)
-	DispatchGroupNameUpdated(event *client.GroupNameUpdatedEvent)
-	DispatchGroupEssenceChanged(event *client.GroupDigestEvent)
-	DispatchGroupDisband(event *client.GroupDisbandEvent)
-
-	// New methods - Request events
-	DispatchNewFriendRequest(event *client.NewFriendRequest)
-	DispatchNewFriend(event *client.NewFriendEvent)
-	DispatchUserJoinGroupRequest(event *client.UserJoinGroupRequest)
-	DispatchGroupInvitedRequest(event *client.GroupInvitedRequest)
-
-	// New methods - Bot events
-	DispatchBotOnline(event *client.BotOnlineEvent)
-	DispatchBotOffline(event *client.BotOfflineEvent)
-	DispatchGroupMsgEmojiLike(event *client.GroupMsgEmojiLikeEvent)
-	DispatchProfileLike(event *client.ProfileLikeEvent)
-	DispatchPokeRecall(event *client.PokeRecallEvent)
+	DispatchGroupRecall(event *GroupMessageRecalledEvent)
+	DispatchFriendRecall(event *FriendMessageRecalledEvent)
+	DispatchGroupMute(event *GroupMuteEvent)
+	DispatchDisconnected(event *ClientDisconnectedEvent)
+	DispatchGroupMemberJoin(event *MemberJoinGroupEvent)
+	DispatchGroupMemberLeave(event *MemberLeaveGroupEvent)
+	DispatchGroupJoin(event *GroupInfo)
+	DispatchGroupLeave(event *GroupLeaveEvent)
+	DispatchGroupMemberPermissionChanged(event *MemberPermissionChangedEvent)
+	DispatchMemberCardUpdated(event *MemberCardUpdatedEvent)
+	DispatchMemberSpecialTitleUpdated(event *MemberSpecialTitleUpdatedEvent)
+	DispatchGroupUploadNotify(event *GroupUploadNotifyEvent)
+	DispatchGroupNotify(event NotifyEvent)
+	DispatchFriendNotify(event NotifyEvent)
+	DispatchGroupNameUpdated(event *GroupNameUpdatedEvent)
+	DispatchGroupEssenceChanged(event *GroupDigestEvent)
+	DispatchGroupDisband(event *GroupDisbandEvent)
+	DispatchNewFriendRequest(event *NewFriendRequest)
+	DispatchNewFriend(event *NewFriendEvent)
+	DispatchUserJoinGroupRequest(event *UserJoinGroupRequest)
+	DispatchGroupInvitedRequest(event *GroupInvitedRequest)
+	DispatchBotOnline(event *BotOnlineEvent)
+	DispatchBotOffline(event *BotOfflineEvent)
+	DispatchGroupMsgEmojiLike(event *GroupMsgEmojiLikeEvent)
+	DispatchProfileLike(event *ProfileLikeEvent)
+	DispatchPokeRecall(event *PokeRecallEvent)
 }
 
 var messengerLogger = logrus.WithField("module", "messenger")
@@ -1120,7 +1112,7 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 
 	switch event.NoticeType {
 	case "group_ban":
-		m.eventDispatcher.DispatchGroupMute(&client.GroupMuteEvent{
+		m.eventDispatcher.DispatchGroupMute(&GroupMuteEvent{
 			GroupCode:   event.GroupID,
 			OperatorUin: event.OperatorID,
 			TargetUin:   event.UserID,
@@ -1154,19 +1146,19 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			} else {
 				messengerLogger.Debugf("Fetched %d members for group %d", len(members), event.GroupID)
 			}
-			// Build client.GroupInfo for dispatch
-			clientGroupInfo := &client.GroupInfo{
+			// Build GroupInfo for dispatch
+			clientGroupInfo := &GroupInfo{
 				Uin:         groupInfo.Uin,
 				Code:        groupInfo.Code,
 				Name:        groupInfo.Name,
-				MemberCount: uint16(groupInfo.MemberCount),
+				MemberCount: groupInfo.MemberCount,
 				OwnerUin:    groupInfo.OwnerUin,
 			}
-			// Also set Members for the client.GroupInfo
+			// Also set Members for the GroupInfo
 			if members != nil {
-				clientGroupInfo.Members = make([]*client.GroupMemberInfo, len(members))
+				clientGroupInfo.Members = make([]*GroupMemberInfo, len(members))
 				for i, mb := range members {
-					clientGroupInfo.Members[i] = &client.GroupMemberInfo{
+					clientGroupInfo.Members[i] = &GroupMemberInfo{
 						Group:    clientGroupInfo,
 						Uin:      mb.Uin,
 						Nickname: mb.Nickname,
@@ -1179,12 +1171,12 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			if err := m.AddGroupMember(event.GroupID, event.UserID); err != nil {
 				messengerLogger.WithError(err).Warnf("AddGroupMember failed for %d/%d", event.GroupID, event.UserID)
 			}
-			m.eventDispatcher.DispatchGroupMemberJoin(&client.MemberJoinGroupEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberJoin(&MemberJoinGroupEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin: event.UserID,
 				},
 			})
@@ -1196,12 +1188,12 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			group := m.FindGroupByUin(event.GroupID)
 			if group != nil {
 				// Save group info for the event
-				groupCopy := &client.GroupInfo{
+				groupCopy := &GroupInfo{
 					Uin:            group.Uin,
 					Code:           group.Code,
 					Name:           group.Name,
-					MemberCount:    uint16(group.MemberCount),
-					MaxMemberCount: uint16(group.MaxMemberCount),
+					MemberCount:    group.MemberCount,
+					MaxMemberCount: group.MaxMemberCount,
 				}
 				m.groupMu.Lock()
 				for i, g := range m.GroupList {
@@ -1211,23 +1203,23 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 					}
 				}
 				m.groupMu.Unlock()
-				m.eventDispatcher.DispatchGroupLeave(&client.GroupLeaveEvent{
+				m.eventDispatcher.DispatchGroupLeave(&GroupLeaveEvent{
 					Group:    groupCopy,
-					Operator: &client.GroupMemberInfo{Uin: event.OperatorID},
+					Operator: &GroupMemberInfo{Uin: event.OperatorID},
 				})
 			}
 		} else {
 			// Regular member left
 			m.RemoveGroupMember(event.GroupID, event.UserID)
-			m.eventDispatcher.DispatchGroupMemberLeave(&client.MemberLeaveGroupEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberLeave(&MemberLeaveGroupEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin: event.UserID,
 				},
-				Operator: &client.GroupMemberInfo{
+				Operator: &GroupMemberInfo{
 					Uin: event.OperatorID,
 				},
 			})
@@ -1243,39 +1235,39 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			member.Permission = newPerm
 		})
 		if event.SubType == "set" {
-			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&client.MemberPermissionChangedEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&MemberPermissionChangedEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin:        event.UserID,
-					Permission: client.Administrator,
+					Permission: Administrator,
 				},
-				OldPermission: client.Member,
-				NewPermission: client.Administrator,
+				OldPermission: Member,
+				NewPermission: Administrator,
 			})
 		} else {
-			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&client.MemberPermissionChangedEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&MemberPermissionChangedEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin:        event.UserID,
-					Permission: client.Member,
+					Permission: Member,
 				},
-				OldPermission: client.Administrator,
-				NewPermission: client.Member,
+				OldPermission: Administrator,
+				NewPermission: Member,
 			})
 		}
 	case "group_card":
 		m.UpdateGroupMember(event.GroupID, event.UserID, func(member *GroupMemberInfo) {
 			member.CardName = event.CardNew
 		})
-		m.eventDispatcher.DispatchMemberCardUpdated(&client.MemberCardUpdatedEvent{
-			Group:   &client.GroupInfo{Uin: event.GroupID, Code: event.GroupID},
-			Member:  &client.GroupMemberInfo{Uin: event.UserID},
+		m.eventDispatcher.DispatchMemberCardUpdated(&MemberCardUpdatedEvent{
+			Group:   &GroupInfo{Uin: event.GroupID, Code: event.GroupID},
+			Member:  &GroupMemberInfo{Uin: event.UserID},
 			OldCard: event.CardOld,
 		})
 	case "friend_add":
@@ -1285,14 +1277,14 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 				nickname = name
 			}
 		}
-		m.eventDispatcher.DispatchNewFriend(&client.NewFriendEvent{
-			Friend: &client.FriendInfo{
+		m.eventDispatcher.DispatchNewFriend(&NewFriendEvent{
+			Friend: &FriendInfo{
 				Uin:      event.UserID,
 				Nickname: nickname,
 			},
 		})
 	case "friend_recall":
-		m.eventDispatcher.DispatchFriendRecall(&client.FriendMessageRecalledEvent{
+		m.eventDispatcher.DispatchFriendRecall(&FriendMessageRecalledEvent{
 			FriendUin: event.UserID,
 			MessageId: int32(event.MessageID),
 			Time:      event.Time,
@@ -1300,61 +1292,61 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 	case "notify":
 		switch event.SubType {
 		case "poke":
-			m.eventDispatcher.DispatchGroupNotify(&client.GroupPokeNotifyEvent{
+			m.eventDispatcher.DispatchGroupNotify(&GroupPokeNotifyEvent{
 				GroupCode: event.GroupID,
 				Sender:    event.UserID,
 				Receiver:  event.OperatorID,
 			})
 		case "title":
-			m.eventDispatcher.DispatchMemberSpecialTitleUpdated(&client.MemberSpecialTitleUpdatedEvent{
+			m.eventDispatcher.DispatchMemberSpecialTitleUpdated(&MemberSpecialTitleUpdatedEvent{
 				GroupCode: event.GroupID,
 				Uin:       event.UserID,
 				NewTitle:  event.Title,
 			})
 		case "profile_like":
-			m.eventDispatcher.DispatchProfileLike(&client.ProfileLikeEvent{
+			m.eventDispatcher.DispatchProfileLike(&ProfileLikeEvent{
 				OperatorId:   event.OperatorID,
 				OperatorNick: event.OperatorNick,
 				Times:        event.Times,
 			})
 		case "poke_recall":
-			m.eventDispatcher.DispatchPokeRecall(&client.PokeRecallEvent{
+			m.eventDispatcher.DispatchPokeRecall(&PokeRecallEvent{
 				GroupCode: event.GroupID,
 				Sender:    event.UserID,
 				Receiver:  event.OperatorID,
 			})
 		}
 	case "group_recall":
-		m.eventDispatcher.DispatchGroupRecall(&client.GroupMessageRecalledEvent{
+		m.eventDispatcher.DispatchGroupRecall(&GroupMessageRecalledEvent{
 			GroupCode:   event.GroupID,
 			OperatorUin: event.OperatorID,
 			AuthorUin:   event.UserID,
 			MessageId:   int32(event.MessageID),
 		})
 	case "essence":
-		m.eventDispatcher.DispatchGroupEssenceChanged(&client.GroupDigestEvent{
+		m.eventDispatcher.DispatchGroupEssenceChanged(&GroupDigestEvent{
 			GroupCode: event.GroupID,
 		})
 	case "group_upload":
-		m.eventDispatcher.DispatchGroupUploadNotify(&client.GroupUploadNotifyEvent{
+		m.eventDispatcher.DispatchGroupUploadNotify(&GroupUploadNotifyEvent{
 			GroupCode: event.GroupID,
 			Sender:    event.UserID,
 			File:      event.File,
 		})
 	case "bot_offline":
-		m.eventDispatcher.DispatchBotOffline(&client.BotOfflineEvent{})
+		m.eventDispatcher.DispatchBotOffline(&BotOfflineEvent{})
 	case "group_dismiss":
-		m.eventDispatcher.DispatchGroupDisband(&client.GroupDisbandEvent{
-			Group: &client.GroupInfo{
+		m.eventDispatcher.DispatchGroupDisband(&GroupDisbandEvent{
+			Group: &GroupInfo{
 				Uin:  event.GroupID,
 				Code: event.GroupID,
 			},
-			Operator: &client.GroupMemberInfo{
+			Operator: &GroupMemberInfo{
 				Uin: event.UserID,
 			},
 		})
 	case "group_msg_emoji_like":
-		m.eventDispatcher.DispatchGroupMsgEmojiLike(&client.GroupMsgEmojiLikeEvent{
+		m.eventDispatcher.DispatchGroupMsgEmojiLike(&GroupMsgEmojiLikeEvent{
 			GroupCode:  event.GroupID,
 			UserId:     event.UserID,
 			MessageId:  event.MessageID,
@@ -1372,7 +1364,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 
 	switch event.RequestType {
 	case "friend":
-		m.eventDispatcher.DispatchNewFriendRequest(&client.NewFriendRequest{
+		m.eventDispatcher.DispatchNewFriendRequest(&NewFriendRequest{
 			RequestId:     time.Now().UnixNano() / 1e6,
 			Message:       event.Comment,
 			RequesterUin:  event.UserID,
@@ -1381,7 +1373,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 		})
 	case "group":
 		if event.SubType == "add" {
-			m.eventDispatcher.DispatchUserJoinGroupRequest(&client.UserJoinGroupRequest{
+			m.eventDispatcher.DispatchUserJoinGroupRequest(&UserJoinGroupRequest{
 				RequestId:     time.Now().UnixNano() / 1e6,
 				Message:       event.Comment,
 				RequesterUin:  event.UserID,
@@ -1390,7 +1382,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 				Flag:          event.Flag,
 			})
 		} else if event.SubType == "invite" {
-			m.eventDispatcher.DispatchGroupInvitedRequest(&client.GroupInvitedRequest{
+			m.eventDispatcher.DispatchGroupInvitedRequest(&GroupInvitedRequest{
 				RequestId:   time.Now().UnixNano() / 1e6,
 				InvitorUin:  event.UserID,
 				InvitorNick: "陌生人",

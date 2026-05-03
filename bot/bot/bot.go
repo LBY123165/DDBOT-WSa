@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	ob11 "github.com/cnxysoft/DDBOT-WSa/adapter/onebot-v11"
@@ -36,39 +35,39 @@ type Bot struct {
 	groupListLock  sync.Mutex
 	friendListLock sync.Mutex
 
-	QQClient                          *client.QQClient
-	GroupMessageRecalledEvent         *client.EventHandle[*client.GroupMessageRecalledEvent]
-	GroupMessageEvent                 *client.EventHandle[*message.GroupMessage]
-	GroupMuteEvent                    *client.EventHandle[*client.GroupMuteEvent]
-	PrivateMessageEvent               *client.EventHandle[*message.PrivateMessage]
-	FriendMessageRecalledEvent        *client.EventHandle[*client.FriendMessageRecalledEvent]
-	DisconnectedEvent                 *client.EventHandle[*client.ClientDisconnectedEvent]
-	SelfGroupMessageEvent             *client.EventHandle[*message.GroupMessage]
-	SelfPrivateMessageEvent           *client.EventHandle[*message.PrivateMessage]
-	GroupMemberJoinEvent              *client.EventHandle[*client.MemberJoinGroupEvent]
-	GroupMemberLeaveEvent             *client.EventHandle[*client.MemberLeaveGroupEvent]
-	GroupInvitedEvent                 *client.EventHandle[*client.GroupInvitedRequest]
-	NewFriendRequestEvent             *client.EventHandle[*client.NewFriendRequest]
-	NewFriendEvent                    *client.EventHandle[*client.NewFriendEvent]
-	GroupJoinEvent                    *client.EventHandle[*client.GroupInfo]
-	GroupLeaveEvent                   *client.EventHandle[*client.GroupLeaveEvent]
-	GroupNotifyEvent                  *client.EventHandle[client.INotifyEvent]
-	FriendNotifyEvent                 *client.EventHandle[client.INotifyEvent]
-	MemberCardUpdatedEvent            *client.EventHandle[*client.MemberCardUpdatedEvent]
-	GroupNameUpdatedEvent             *client.EventHandle[*client.GroupNameUpdatedEvent]
-	MemberSpecialTitleUpdatedEvent    *client.EventHandle[*client.MemberSpecialTitleUpdatedEvent]
-	GroupMemberPermissionChangedEvent *client.EventHandle[*client.MemberPermissionChangedEvent]
-	GroupEssenceChangedEvent          *client.EventHandle[*client.GroupDigestEvent]
-	GroupDisbandEvent                 *client.EventHandle[*client.GroupDisbandEvent]
-	GroupUploadNotifyEvent            *client.EventHandle[*client.GroupUploadNotifyEvent]
-	GroupNotifyNotifyEvent            *client.EventHandle[client.INotifyEvent]
-	TempMessageEvent                  *client.EventHandle[*client.TempMessageEvent]
-	BotOnlineEvent                    *client.EventHandle[*client.BotOnlineEvent]
-	BotOfflineEvent                   *client.EventHandle[*client.BotOfflineEvent]
-	BotSendFailedEvent                *client.EventHandle[*client.BotSendFailedEvent]
-	GroupMsgEmojiLikeEvent            *client.EventHandle[*client.GroupMsgEmojiLikeEvent]
-	ProfileLikeEvent                  *client.EventHandle[*client.ProfileLikeEvent]
-	PokeRecallEvent                   *client.EventHandle[*client.PokeRecallEvent]
+	QQClient                          interface{}
+	GroupMessageRecalledEvent         *EventHandle[*adapter.GroupMessageRecalledEvent]
+	GroupMessageEvent                 *EventHandle[*message.GroupMessage]
+	GroupMuteEvent                    *EventHandle[*adapter.GroupMuteEvent]
+	PrivateMessageEvent               *EventHandle[*message.PrivateMessage]
+	FriendMessageRecalledEvent        *EventHandle[*adapter.FriendMessageRecalledEvent]
+	DisconnectedEvent                 *EventHandle[*adapter.ClientDisconnectedEvent]
+	SelfGroupMessageEvent             *EventHandle[*message.GroupMessage]
+	SelfPrivateMessageEvent           *EventHandle[*message.PrivateMessage]
+	GroupMemberJoinEvent              *EventHandle[*adapter.MemberJoinGroupEvent]
+	GroupMemberLeaveEvent             *EventHandle[*adapter.MemberLeaveGroupEvent]
+	GroupInvitedEvent                 *EventHandle[*adapter.GroupInvitedRequest]
+	NewFriendRequestEvent             *EventHandle[*adapter.NewFriendRequest]
+	NewFriendEvent                    *EventHandle[*adapter.NewFriendEvent]
+	GroupJoinEvent                    *EventHandle[*adapter.GroupInfo]
+	GroupLeaveEvent                   *EventHandle[*adapter.GroupLeaveEvent]
+	GroupNotifyEvent                  *EventHandle[adapter.NotifyEvent]
+	FriendNotifyEvent                 *EventHandle[adapter.NotifyEvent]
+	MemberCardUpdatedEvent            *EventHandle[*adapter.MemberCardUpdatedEvent]
+	GroupNameUpdatedEvent             *EventHandle[*adapter.GroupNameUpdatedEvent]
+	MemberSpecialTitleUpdatedEvent    *EventHandle[*adapter.MemberSpecialTitleUpdatedEvent]
+	GroupMemberPermissionChangedEvent *EventHandle[*adapter.MemberPermissionChangedEvent]
+	GroupEssenceChangedEvent          *EventHandle[*adapter.GroupDigestEvent]
+	GroupDisbandEvent                 *EventHandle[*adapter.GroupDisbandEvent]
+	GroupUploadNotifyEvent            *EventHandle[*adapter.GroupUploadNotifyEvent]
+	GroupNotifyNotifyEvent            *EventHandle[adapter.NotifyEvent]
+	TempMessageEvent                  *EventHandle[interface{}]
+	BotOnlineEvent                    *EventHandle[*adapter.BotOnlineEvent]
+	BotOfflineEvent                   *EventHandle[*adapter.BotOfflineEvent]
+	BotSendFailedEvent                *EventHandle[*adapter.BotSendFailedEvent]
+	GroupMsgEmojiLikeEvent            *EventHandle[*adapter.GroupMsgEmojiLikeEvent]
+	ProfileLikeEvent                  *EventHandle[*adapter.ProfileLikeEvent]
+	PokeRecallEvent                   *EventHandle[*adapter.PokeRecallEvent]
 }
 
 func (bot *Bot) GetUin() int64 {
@@ -309,38 +308,38 @@ func Init() {
 		Messenger:                         messenger,
 		start:                             false,
 		QQClient:                          nil,
-		GroupMessageRecalledEvent:         &client.EventHandle[*client.GroupMessageRecalledEvent]{},
-		GroupMessageEvent:                 &client.EventHandle[*message.GroupMessage]{},
-		GroupMuteEvent:                    &client.EventHandle[*client.GroupMuteEvent]{},
-		PrivateMessageEvent:               &client.EventHandle[*message.PrivateMessage]{},
-		FriendMessageRecalledEvent:        &client.EventHandle[*client.FriendMessageRecalledEvent]{},
-		DisconnectedEvent:                 &client.EventHandle[*client.ClientDisconnectedEvent]{},
-		SelfGroupMessageEvent:             &client.EventHandle[*message.GroupMessage]{},
-		SelfPrivateMessageEvent:           &client.EventHandle[*message.PrivateMessage]{},
-		GroupMemberJoinEvent:              &client.EventHandle[*client.MemberJoinGroupEvent]{},
-		GroupMemberLeaveEvent:             &client.EventHandle[*client.MemberLeaveGroupEvent]{},
-		GroupInvitedEvent:                 &client.EventHandle[*client.GroupInvitedRequest]{},
-		NewFriendRequestEvent:             &client.EventHandle[*client.NewFriendRequest]{},
-		NewFriendEvent:                    &client.EventHandle[*client.NewFriendEvent]{},
-		GroupJoinEvent:                    &client.EventHandle[*client.GroupInfo]{},
-		GroupLeaveEvent:                   &client.EventHandle[*client.GroupLeaveEvent]{},
-		GroupNotifyEvent:                  &client.EventHandle[client.INotifyEvent]{},
-		FriendNotifyEvent:                 &client.EventHandle[client.INotifyEvent]{},
-		MemberCardUpdatedEvent:            &client.EventHandle[*client.MemberCardUpdatedEvent]{},
-		GroupNameUpdatedEvent:             &client.EventHandle[*client.GroupNameUpdatedEvent]{},
-		MemberSpecialTitleUpdatedEvent:    &client.EventHandle[*client.MemberSpecialTitleUpdatedEvent]{},
-		GroupMemberPermissionChangedEvent: &client.EventHandle[*client.MemberPermissionChangedEvent]{},
-		GroupEssenceChangedEvent:          &client.EventHandle[*client.GroupDigestEvent]{},
-		GroupDisbandEvent:                 &client.EventHandle[*client.GroupDisbandEvent]{},
-		GroupUploadNotifyEvent:            &client.EventHandle[*client.GroupUploadNotifyEvent]{},
-		GroupNotifyNotifyEvent:            &client.EventHandle[client.INotifyEvent]{},
-		TempMessageEvent:                  &client.EventHandle[*client.TempMessageEvent]{},
-		BotOnlineEvent:                    &client.EventHandle[*client.BotOnlineEvent]{},
-		BotOfflineEvent:                   &client.EventHandle[*client.BotOfflineEvent]{},
-		BotSendFailedEvent:                &client.EventHandle[*client.BotSendFailedEvent]{},
-		GroupMsgEmojiLikeEvent:            &client.EventHandle[*client.GroupMsgEmojiLikeEvent]{},
-		ProfileLikeEvent:                  &client.EventHandle[*client.ProfileLikeEvent]{},
-		PokeRecallEvent:                   &client.EventHandle[*client.PokeRecallEvent]{},
+		GroupMessageRecalledEvent:         &EventHandle[*adapter.GroupMessageRecalledEvent]{},
+		GroupMessageEvent:                 &EventHandle[*message.GroupMessage]{},
+		GroupMuteEvent:                    &EventHandle[*adapter.GroupMuteEvent]{},
+		PrivateMessageEvent:               &EventHandle[*message.PrivateMessage]{},
+		FriendMessageRecalledEvent:        &EventHandle[*adapter.FriendMessageRecalledEvent]{},
+		DisconnectedEvent:                 &EventHandle[*adapter.ClientDisconnectedEvent]{},
+		SelfGroupMessageEvent:             &EventHandle[*message.GroupMessage]{},
+		SelfPrivateMessageEvent:           &EventHandle[*message.PrivateMessage]{},
+		GroupMemberJoinEvent:              &EventHandle[*adapter.MemberJoinGroupEvent]{},
+		GroupMemberLeaveEvent:             &EventHandle[*adapter.MemberLeaveGroupEvent]{},
+		GroupInvitedEvent:                 &EventHandle[*adapter.GroupInvitedRequest]{},
+		NewFriendRequestEvent:             &EventHandle[*adapter.NewFriendRequest]{},
+		NewFriendEvent:                    &EventHandle[*adapter.NewFriendEvent]{},
+		GroupJoinEvent:                    &EventHandle[*adapter.GroupInfo]{},
+		GroupLeaveEvent:                   &EventHandle[*adapter.GroupLeaveEvent]{},
+		GroupNotifyEvent:                  &EventHandle[adapter.NotifyEvent]{},
+		FriendNotifyEvent:                 &EventHandle[adapter.NotifyEvent]{},
+		MemberCardUpdatedEvent:            &EventHandle[*adapter.MemberCardUpdatedEvent]{},
+		GroupNameUpdatedEvent:             &EventHandle[*adapter.GroupNameUpdatedEvent]{},
+		MemberSpecialTitleUpdatedEvent:    &EventHandle[*adapter.MemberSpecialTitleUpdatedEvent]{},
+		GroupMemberPermissionChangedEvent: &EventHandle[*adapter.MemberPermissionChangedEvent]{},
+		GroupEssenceChangedEvent:          &EventHandle[*adapter.GroupDigestEvent]{},
+		GroupDisbandEvent:                 &EventHandle[*adapter.GroupDisbandEvent]{},
+		GroupUploadNotifyEvent:            &EventHandle[*adapter.GroupUploadNotifyEvent]{},
+		GroupNotifyNotifyEvent:            &EventHandle[adapter.NotifyEvent]{},
+		TempMessageEvent:                  &EventHandle[interface{}]{},
+		BotOnlineEvent:                    &EventHandle[*adapter.BotOnlineEvent]{},
+		BotOfflineEvent:                   &EventHandle[*adapter.BotOfflineEvent]{},
+		BotSendFailedEvent:                &EventHandle[*adapter.BotSendFailedEvent]{},
+		GroupMsgEmojiLikeEvent:            &EventHandle[*adapter.GroupMsgEmojiLikeEvent]{},
+		ProfileLikeEvent:                  &EventHandle[*adapter.ProfileLikeEvent]{},
+		PokeRecallEvent:                   &EventHandle[*adapter.PokeRecallEvent]{},
 	}
 
 	messenger.SetBotEventDispatcher(Instance)
@@ -521,179 +520,179 @@ func (bot *Bot) DispatchGroupMessage(msg *message.GroupMessage) {
 	logger.Debugf("DispatchGroupMessage called: group=%d, user=%d, bot=%p, GroupMessageEvent=%p", msg.GroupCode, msg.Sender.Uin, bot, bot.GroupMessageEvent)
 	if bot.GroupMessageEvent != nil {
 		logger.Debugf("Dispatching to GroupMessageEvent")
-		bot.GroupMessageEvent.Dispatch(nil, msg)
+		bot.GroupMessageEvent.Dispatch(msg)
 	} else {
 		logger.Warn("GroupMessageEvent is nil!")
 	}
 	if bot.SelfGroupMessageEvent != nil && msg.Sender.Uin == bot.GetSelfID() {
-		bot.SelfGroupMessageEvent.Dispatch(nil, msg)
+		bot.SelfGroupMessageEvent.Dispatch(msg)
 	}
 }
 
 func (bot *Bot) DispatchPrivateMessage(msg *message.PrivateMessage) {
 	if bot.PrivateMessageEvent != nil {
-		bot.PrivateMessageEvent.Dispatch(nil, msg)
+		bot.PrivateMessageEvent.Dispatch(msg)
 	}
 	if bot.SelfPrivateMessageEvent != nil && msg.Sender.Uin == bot.GetSelfID() {
-		bot.SelfPrivateMessageEvent.Dispatch(nil, msg)
+		bot.SelfPrivateMessageEvent.Dispatch(msg)
 	}
 }
 
-func (bot *Bot) DispatchGroupRecall(event *client.GroupMessageRecalledEvent) {
+func (bot *Bot) DispatchGroupRecall(event *adapter.GroupMessageRecalledEvent) {
 	if bot.GroupMessageRecalledEvent != nil {
-		bot.GroupMessageRecalledEvent.Dispatch(nil, event)
+		bot.GroupMessageRecalledEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchFriendRecall(event *client.FriendMessageRecalledEvent) {
+func (bot *Bot) DispatchFriendRecall(event *adapter.FriendMessageRecalledEvent) {
 	if bot.FriendMessageRecalledEvent != nil {
-		bot.FriendMessageRecalledEvent.Dispatch(nil, event)
+		bot.FriendMessageRecalledEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupMute(event *client.GroupMuteEvent) {
+func (bot *Bot) DispatchGroupMute(event *adapter.GroupMuteEvent) {
 	if bot.GroupMuteEvent != nil {
-		bot.GroupMuteEvent.Dispatch(nil, event)
+		bot.GroupMuteEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchDisconnected(event *client.ClientDisconnectedEvent) {
+func (bot *Bot) DispatchDisconnected(event *adapter.ClientDisconnectedEvent) {
 	if bot.DisconnectedEvent != nil {
-		bot.DisconnectedEvent.Dispatch(nil, event)
+		bot.DisconnectedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupMemberJoin(event *client.MemberJoinGroupEvent) {
+func (bot *Bot) DispatchGroupMemberJoin(event *adapter.MemberJoinGroupEvent) {
 	if bot.GroupMemberJoinEvent != nil {
-		bot.GroupMemberJoinEvent.Dispatch(nil, event)
+		bot.GroupMemberJoinEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupMemberLeave(event *client.MemberLeaveGroupEvent) {
+func (bot *Bot) DispatchGroupMemberLeave(event *adapter.MemberLeaveGroupEvent) {
 	if bot.GroupMemberLeaveEvent != nil {
-		bot.GroupMemberLeaveEvent.Dispatch(nil, event)
+		bot.GroupMemberLeaveEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupJoin(event *client.GroupInfo) {
+func (bot *Bot) DispatchGroupJoin(event *adapter.GroupInfo) {
 	if bot.GroupJoinEvent != nil {
-		bot.GroupJoinEvent.Dispatch(nil, event)
+		bot.GroupJoinEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupLeave(event *client.GroupLeaveEvent) {
+func (bot *Bot) DispatchGroupLeave(event *adapter.GroupLeaveEvent) {
 	if bot.GroupLeaveEvent != nil {
-		bot.GroupLeaveEvent.Dispatch(nil, event)
+		bot.GroupLeaveEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupMemberPermissionChanged(event *client.MemberPermissionChangedEvent) {
+func (bot *Bot) DispatchGroupMemberPermissionChanged(event *adapter.MemberPermissionChangedEvent) {
 	if bot.GroupMemberPermissionChangedEvent != nil {
-		bot.GroupMemberPermissionChangedEvent.Dispatch(nil, event)
+		bot.GroupMemberPermissionChangedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchMemberCardUpdated(event *client.MemberCardUpdatedEvent) {
+func (bot *Bot) DispatchMemberCardUpdated(event *adapter.MemberCardUpdatedEvent) {
 	if bot.MemberCardUpdatedEvent != nil {
-		bot.MemberCardUpdatedEvent.Dispatch(nil, event)
+		bot.MemberCardUpdatedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchMemberSpecialTitleUpdated(event *client.MemberSpecialTitleUpdatedEvent) {
+func (bot *Bot) DispatchMemberSpecialTitleUpdated(event *adapter.MemberSpecialTitleUpdatedEvent) {
 	if bot.MemberSpecialTitleUpdatedEvent != nil {
-		bot.MemberSpecialTitleUpdatedEvent.Dispatch(nil, event)
+		bot.MemberSpecialTitleUpdatedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupUploadNotify(event *client.GroupUploadNotifyEvent) {
+func (bot *Bot) DispatchGroupUploadNotify(event *adapter.GroupUploadNotifyEvent) {
 	if bot.GroupUploadNotifyEvent != nil {
-		bot.GroupUploadNotifyEvent.Dispatch(nil, event)
+		bot.GroupUploadNotifyEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupNotify(event client.INotifyEvent) {
+func (bot *Bot) DispatchGroupNotify(event adapter.NotifyEvent) {
 	if bot.GroupNotifyEvent != nil {
-		bot.GroupNotifyEvent.Dispatch(nil, event)
+		bot.GroupNotifyEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchFriendNotify(event client.INotifyEvent) {
+func (bot *Bot) DispatchFriendNotify(event adapter.NotifyEvent) {
 	if bot.FriendNotifyEvent != nil {
-		bot.FriendNotifyEvent.Dispatch(nil, event)
+		bot.FriendNotifyEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupNameUpdated(event *client.GroupNameUpdatedEvent) {
+func (bot *Bot) DispatchGroupNameUpdated(event *adapter.GroupNameUpdatedEvent) {
 	if bot.GroupNameUpdatedEvent != nil {
-		bot.GroupNameUpdatedEvent.Dispatch(nil, event)
+		bot.GroupNameUpdatedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupEssenceChanged(event *client.GroupDigestEvent) {
+func (bot *Bot) DispatchGroupEssenceChanged(event *adapter.GroupDigestEvent) {
 	if bot.GroupEssenceChangedEvent != nil {
-		bot.GroupEssenceChangedEvent.Dispatch(nil, event)
+		bot.GroupEssenceChangedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupDisband(event *client.GroupDisbandEvent) {
+func (bot *Bot) DispatchGroupDisband(event *adapter.GroupDisbandEvent) {
 	if bot.GroupDisbandEvent != nil {
-		bot.GroupDisbandEvent.Dispatch(nil, event)
+		bot.GroupDisbandEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchNewFriendRequest(event *client.NewFriendRequest) {
+func (bot *Bot) DispatchNewFriendRequest(event *adapter.NewFriendRequest) {
 	if bot.NewFriendRequestEvent != nil {
-		bot.NewFriendRequestEvent.Dispatch(nil, event)
+		bot.NewFriendRequestEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchNewFriend(event *client.NewFriendEvent) {
+func (bot *Bot) DispatchNewFriend(event *adapter.NewFriendEvent) {
 	if bot.NewFriendEvent != nil {
-		bot.NewFriendEvent.Dispatch(nil, event)
+		bot.NewFriendEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchUserJoinGroupRequest(event *client.UserJoinGroupRequest) {
+func (bot *Bot) DispatchUserJoinGroupRequest(event *adapter.UserJoinGroupRequest) {
 	if bot.GroupJoinEvent != nil {
-		info := &client.GroupInfo{
+		info := &adapter.GroupInfo{
 			Uin: event.GroupCode,
 		}
-		bot.GroupJoinEvent.Dispatch(nil, info)
+		bot.GroupJoinEvent.Dispatch(info)
 	}
 }
 
-func (bot *Bot) DispatchGroupInvitedRequest(event *client.GroupInvitedRequest) {
+func (bot *Bot) DispatchGroupInvitedRequest(event *adapter.GroupInvitedRequest) {
 	if bot.GroupInvitedEvent != nil {
-		bot.GroupInvitedEvent.Dispatch(nil, event)
+		bot.GroupInvitedEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchBotOnline(event *client.BotOnlineEvent) {
+func (bot *Bot) DispatchBotOnline(event *adapter.BotOnlineEvent) {
 	if bot.BotOnlineEvent != nil {
-		bot.BotOnlineEvent.Dispatch(nil, event)
+		bot.BotOnlineEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchBotOffline(event *client.BotOfflineEvent) {
+func (bot *Bot) DispatchBotOffline(event *adapter.BotOfflineEvent) {
 	if bot.BotOfflineEvent != nil {
-		bot.BotOfflineEvent.Dispatch(nil, event)
+		bot.BotOfflineEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchGroupMsgEmojiLike(event *client.GroupMsgEmojiLikeEvent) {
+func (bot *Bot) DispatchGroupMsgEmojiLike(event *adapter.GroupMsgEmojiLikeEvent) {
 	if bot.GroupMsgEmojiLikeEvent != nil {
-		bot.GroupMsgEmojiLikeEvent.Dispatch(nil, event)
+		bot.GroupMsgEmojiLikeEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchProfileLike(event *client.ProfileLikeEvent) {
+func (bot *Bot) DispatchProfileLike(event *adapter.ProfileLikeEvent) {
 	if bot.ProfileLikeEvent != nil {
-		bot.ProfileLikeEvent.Dispatch(nil, event)
+		bot.ProfileLikeEvent.Dispatch(event)
 	}
 }
 
-func (bot *Bot) DispatchPokeRecall(event *client.PokeRecallEvent) {
+func (bot *Bot) DispatchPokeRecall(event *adapter.PokeRecallEvent) {
 	if bot.PokeRecallEvent != nil {
-		bot.PokeRecallEvent.Dispatch(nil, event)
+		bot.PokeRecallEvent.Dispatch(event)
 	}
 }

@@ -2,13 +2,14 @@ package lsp
 
 import (
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/client"
+	"strings"
+	"time"
+
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/tidwall/buntdb"
-	"strings"
-	"time"
 )
 
 type KeySet struct{}
@@ -154,21 +155,21 @@ func (s *StateManager) GetCurrentMode() Mode {
 	return result
 }
 
-func (s *StateManager) SaveGroupInvitedRequest(request *client.GroupInvitedRequest) error {
+func (s *StateManager) SaveGroupInvitedRequest(request *adapter.GroupInvitedRequest) error {
 	return s.saveRequest(request.RequestId, request, s.GroupInvitedKey)
 }
 
-func (s *StateManager) SaveNewFriendRequest(request *client.NewFriendRequest) error {
+func (s *StateManager) SaveNewFriendRequest(request *adapter.NewFriendRequest) error {
 	return s.saveRequest(request.RequestId, request, s.NewFriendRequestKey)
 }
 
-func (s *StateManager) ListNewFriendRequest() (results []*client.NewFriendRequest, err error) {
+func (s *StateManager) ListNewFriendRequest() (results []*adapter.NewFriendRequest, err error) {
 	err = s.RCoverTx(func(tx *buntdb.Tx) error {
 		var (
 			iterErr, err error
 		)
 		err = tx.Ascend(s.NewFriendRequestKey(), func(key, value string) bool {
-			var item = new(client.NewFriendRequest)
+			var item = new(adapter.NewFriendRequest)
 			iterErr = s.GetJson(key, &item)
 			if iterErr == nil {
 				results = append(results, item)
@@ -187,13 +188,13 @@ func (s *StateManager) ListNewFriendRequest() (results []*client.NewFriendReques
 	return
 }
 
-func (s *StateManager) ListGroupInvitedRequest() (results []*client.GroupInvitedRequest, err error) {
+func (s *StateManager) ListGroupInvitedRequest() (results []*adapter.GroupInvitedRequest, err error) {
 	err = s.RCoverTx(func(tx *buntdb.Tx) error {
 		var (
 			iterErr, err error
 		)
 		err = tx.Ascend(s.GroupInvitedKey(), func(key, value string) bool {
-			var item = new(client.GroupInvitedRequest)
+			var item = new(adapter.GroupInvitedRequest)
 			iterErr = s.GetJson(key, &item)
 			if iterErr == nil {
 				results = append(results, item)
@@ -222,12 +223,12 @@ func (s *StateManager) DeleteGroupInvitedRequest(requestId int64) (err error) {
 	return
 }
 
-func (s *StateManager) GetNewFriendRequest(requestId int64) (result *client.NewFriendRequest, err error) {
+func (s *StateManager) GetNewFriendRequest(requestId int64) (result *adapter.NewFriendRequest, err error) {
 	err = s.getRequest(requestId, &result, s.NewFriendRequestKey)
 	return
 }
 
-func (s *StateManager) GetGroupInvitedRequest(requestId int64) (result *client.GroupInvitedRequest, err error) {
+func (s *StateManager) GetGroupInvitedRequest(requestId int64) (result *adapter.GroupInvitedRequest, err error) {
 	err = s.getRequest(requestId, &result, s.GroupInvitedKey)
 	return
 }

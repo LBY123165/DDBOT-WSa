@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/stretchr/testify/assert"
 )
@@ -103,96 +102,96 @@ func newMockDispatcher() *mockDispatcher {
 
 func (d *mockDispatcher) DispatchGroupMessage(msg *message.GroupMessage)     {}
 func (d *mockDispatcher) DispatchPrivateMessage(msg *message.PrivateMessage) {}
-func (d *mockDispatcher) DispatchGroupRecall(event *client.GroupMessageRecalledEvent) {
+func (d *mockDispatcher) DispatchGroupRecall(event *GroupMessageRecalledEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_recall")
 }
-func (d *mockDispatcher) DispatchFriendRecall(event *client.FriendMessageRecalledEvent) {
+func (d *mockDispatcher) DispatchFriendRecall(event *FriendMessageRecalledEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "friend_recall")
 }
-func (d *mockDispatcher) DispatchGroupMute(event *client.GroupMuteEvent) {
+func (d *mockDispatcher) DispatchGroupMute(event *GroupMuteEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_ban")
 }
-func (d *mockDispatcher) DispatchDisconnected(event *client.ClientDisconnectedEvent) {}
-func (d *mockDispatcher) DispatchGroupMemberJoin(event *client.MemberJoinGroupEvent) {
+func (d *mockDispatcher) DispatchDisconnected(event *ClientDisconnectedEvent) {}
+func (d *mockDispatcher) DispatchGroupMemberJoin(event *MemberJoinGroupEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_increase")
 }
-func (d *mockDispatcher) DispatchGroupMemberLeave(event *client.MemberLeaveGroupEvent) {
+func (d *mockDispatcher) DispatchGroupMemberLeave(event *MemberLeaveGroupEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_decrease")
 }
-func (d *mockDispatcher) DispatchGroupJoin(event *client.GroupInfo)        {}
-func (d *mockDispatcher) DispatchGroupLeave(event *client.GroupLeaveEvent) {}
-func (d *mockDispatcher) DispatchGroupMemberPermissionChanged(event *client.MemberPermissionChangedEvent) {
+func (d *mockDispatcher) DispatchGroupJoin(event *GroupInfo)        {}
+func (d *mockDispatcher) DispatchGroupLeave(event *GroupLeaveEvent) {}
+func (d *mockDispatcher) DispatchGroupMemberPermissionChanged(event *MemberPermissionChangedEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_admin")
 }
-func (d *mockDispatcher) DispatchMemberCardUpdated(event *client.MemberCardUpdatedEvent) {
+func (d *mockDispatcher) DispatchMemberCardUpdated(event *MemberCardUpdatedEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_card")
 }
-func (d *mockDispatcher) DispatchMemberSpecialTitleUpdated(event *client.MemberSpecialTitleUpdatedEvent) {
+func (d *mockDispatcher) DispatchMemberSpecialTitleUpdated(event *MemberSpecialTitleUpdatedEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "notify_title")
 }
-func (d *mockDispatcher) DispatchGroupUploadNotify(event *client.GroupUploadNotifyEvent) {
+func (d *mockDispatcher) DispatchGroupUploadNotify(event *GroupUploadNotifyEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_upload")
 }
-func (d *mockDispatcher) DispatchGroupNotify(event client.INotifyEvent) {
+func (d *mockDispatcher) DispatchGroupNotify(event NotifyEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "notify_poke")
 }
-func (d *mockDispatcher) DispatchFriendNotify(event client.INotifyEvent)               {}
-func (d *mockDispatcher) DispatchGroupNameUpdated(event *client.GroupNameUpdatedEvent) {}
-func (d *mockDispatcher) DispatchGroupEssenceChanged(event *client.GroupDigestEvent) {
+func (d *mockDispatcher) DispatchFriendNotify(event NotifyEvent)               {}
+func (d *mockDispatcher) DispatchGroupNameUpdated(event *GroupNameUpdatedEvent) {}
+func (d *mockDispatcher) DispatchGroupEssenceChanged(event *GroupDigestEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "essence")
 }
-func (d *mockDispatcher) DispatchGroupDisband(event *client.GroupDisbandEvent) {
+func (d *mockDispatcher) DispatchGroupDisband(event *GroupDisbandEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_dismiss")
 }
-func (d *mockDispatcher) DispatchNewFriendRequest(event *client.NewFriendRequest) {}
-func (d *mockDispatcher) DispatchNewFriend(event *client.NewFriendEvent) {
+func (d *mockDispatcher) DispatchNewFriendRequest(event *NewFriendRequest) {}
+func (d *mockDispatcher) DispatchNewFriend(event *NewFriendEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "friend_add")
 }
-func (d *mockDispatcher) DispatchUserJoinGroupRequest(event *client.UserJoinGroupRequest) {}
-func (d *mockDispatcher) DispatchGroupInvitedRequest(event *client.GroupInvitedRequest)   {}
-func (d *mockDispatcher) DispatchBotOnline(event *client.BotOnlineEvent)                  {}
-func (d *mockDispatcher) DispatchBotOffline(event *client.BotOfflineEvent) {
+func (d *mockDispatcher) DispatchUserJoinGroupRequest(event *UserJoinGroupRequest) {}
+func (d *mockDispatcher) DispatchGroupInvitedRequest(event *GroupInvitedRequest)   {}
+func (d *mockDispatcher) DispatchBotOnline(event *BotOnlineEvent)                  {}
+func (d *mockDispatcher) DispatchBotOffline(event *BotOfflineEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "bot_offline")
 }
-func (d *mockDispatcher) DispatchGroupMsgEmojiLike(event *client.GroupMsgEmojiLikeEvent) {
+func (d *mockDispatcher) DispatchGroupMsgEmojiLike(event *GroupMsgEmojiLikeEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "group_msg_emoji_like")
 }
-func (d *mockDispatcher) DispatchProfileLike(event *client.ProfileLikeEvent) {
+func (d *mockDispatcher) DispatchProfileLike(event *ProfileLikeEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "profile_like")
 }
-func (d *mockDispatcher) DispatchPokeRecall(event *client.PokeRecallEvent) {
+func (d *mockDispatcher) DispatchPokeRecall(event *PokeRecallEvent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, "poke_recall")
@@ -506,7 +505,7 @@ func TestMessengerHandleNoticeEvent_GroupUpload(t *testing.T) {
 			NoticeType: "group_upload",
 			GroupID:    545402644,
 			UserID:     1001,
-			File:       client.GroupFile{},
+			File:       GroupFile{},
 			Time:       time.Now().Unix(),
 		})
 	}()
@@ -840,42 +839,42 @@ func TestMessenger_UpdateGroupMember_NoDeadlock(t *testing.T) {
 // dispatch methods so we can capture and verify the events.
 type mockRequestDispatcher struct {
 	*mockDispatcher
-	newFriendRequest *client.NewFriendRequest
-	groupInvited     *client.GroupInvitedRequest
-	userJoinGroup    *client.UserJoinGroupRequest
+	newFriendRequest *NewFriendRequest
+	groupInvited     *GroupInvitedRequest
+	userJoinGroup    *UserJoinGroupRequest
 }
 
 func newMockRequestDispatcher() *mockRequestDispatcher {
 	return &mockRequestDispatcher{mockDispatcher: newMockDispatcher()}
 }
 
-func (d *mockRequestDispatcher) DispatchNewFriendRequest(event *client.NewFriendRequest) {
+func (d *mockRequestDispatcher) DispatchNewFriendRequest(event *NewFriendRequest) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.newFriendRequest = event
 }
-func (d *mockRequestDispatcher) DispatchGroupInvitedRequest(event *client.GroupInvitedRequest) {
+func (d *mockRequestDispatcher) DispatchGroupInvitedRequest(event *GroupInvitedRequest) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.groupInvited = event
 }
-func (d *mockRequestDispatcher) DispatchUserJoinGroupRequest(event *client.UserJoinGroupRequest) {
+func (d *mockRequestDispatcher) DispatchUserJoinGroupRequest(event *UserJoinGroupRequest) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.userJoinGroup = event
 }
 
-func (d *mockRequestDispatcher) getFriendRequest() *client.NewFriendRequest {
+func (d *mockRequestDispatcher) getFriendRequest() *NewFriendRequest {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.newFriendRequest
 }
-func (d *mockRequestDispatcher) getGroupInvited() *client.GroupInvitedRequest {
+func (d *mockRequestDispatcher) getGroupInvited() *GroupInvitedRequest {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.groupInvited
 }
-func (d *mockRequestDispatcher) getUserJoinGroup() *client.UserJoinGroupRequest {
+func (d *mockRequestDispatcher) getUserJoinGroup() *UserJoinGroupRequest {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.userJoinGroup

@@ -1,10 +1,10 @@
 package adapter
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
 )
 
@@ -77,7 +77,7 @@ type NoticeEvent struct {
 	SubType      string
 	Title        string
 	MessageID    int64
-	File         client.GroupFile
+	File         GroupFile
 	EmojiId      string
 	EmojiCount   int
 	OperatorNick string
@@ -95,6 +95,25 @@ type RequestEvent struct {
 	Comment     string
 	Flag        string
 	SubType     string
+}
+
+type GroupFile struct {
+	GroupCode     int64  `json:"group_id,omitempty"`
+	FileId        string `json:"file_id,omitempty"`
+	FileName      string `json:"file_name,omitempty"`
+	BusId         int32  `json:"busid,omitempty"`
+	FileSize      int64  `json:"file_size,omitempty"`
+	UploadTime    int64  `json:"upload_time,omitempty"`
+	DeadTime      int64  `json:"dead_time,omitempty"`
+	ModifyTime    int64  `json:"modify_time,omitempty"`
+	DownloadTimes int64  `json:"download_times,omitempty"`
+	Uploader      int64  `json:"uploader,omitempty"`
+	UploaderName  string `json:"uploader_name,omitempty"`
+	AltFildId     string `json:"id,omitempty"`
+	AltFileSize   int64  `json:"size,omitempty"`
+	AltFileName   string `json:"name,omitempty"`
+	FileUrl       string `json:"file_url,omitempty"`
+	AltFileUrl    string `json:"url,omitempty"`
 }
 
 type MemberPermission int
@@ -340,13 +359,13 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 			}
 		case "image":
 			elements = append(elements, &message.GroupImageElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
+				Url:  interfaceString(seg.Data["url"]),
+				Name: interfaceString(seg.Data["file"]),
 			})
 		case "record":
 			elements = append(elements, &message.VoiceElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
+				Url:  interfaceString(seg.Data["url"]),
+				Name: interfaceString(seg.Data["file"]),
 			})
 		case "reply":
 			var replySeq int64
@@ -368,9 +387,9 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 			}
 		case "file":
 			elements = append(elements, &message.GroupFileElement{
-				Name: getString(seg.Data["name"]),
-				Id:   getString(seg.Data["id"]),
-				Url:  getString(seg.Data["url"]),
+				Name: interfaceString(seg.Data["name"]),
+				Id:   interfaceString(seg.Data["id"]),
+				Url:  interfaceString(seg.Data["url"]),
 			})
 		}
 	}
@@ -405,6 +424,23 @@ func ParseMessageSegments(msg interface{}) []MessageSegment {
 	}
 
 	return segments
+}
+
+func interfaceString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case int:
+		return strconv.Itoa(val)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 func BuildMessageParams(message interface{}) map[string]interface{} {

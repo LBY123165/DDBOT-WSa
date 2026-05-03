@@ -1,8 +1,8 @@
 package lsp
 
 import (
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/stretchr/testify/assert"
@@ -147,7 +147,7 @@ func TestStateManager_GetNewFriendRequest(t *testing.T) {
 	_, err := sm.GetNewFriendRequest(0)
 	assert.NotNil(t, err)
 
-	var expected = []*client.NewFriendRequest{
+	var expected = []*adapter.NewFriendRequest{
 		{
 			RequestId:     test.ID1,
 			Message:       "test1",
@@ -204,7 +204,7 @@ func TestStateManager_GetGroupInvitedRequest(t *testing.T) {
 	_, err := sm.GetGroupInvitedRequest(0)
 	assert.NotNil(t, err)
 
-	var expected = []*client.GroupInvitedRequest{
+	var expected = []*adapter.GroupInvitedRequest{
 		{
 			RequestId:   test.ID1,
 			InvitorUin:  test.UID1,
