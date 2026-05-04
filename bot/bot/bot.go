@@ -37,13 +37,13 @@ type Bot struct {
 
 	QQClient                          interface{}
 	GroupMessageRecalledEvent         *EventHandle[*adapter.GroupMessageRecalledEvent]
-	GroupMessageEvent                 *EventHandle[*message.GroupMessage]
+	GroupMessageEvent                 *EventHandle[*adapter.GroupMessage]
 	GroupMuteEvent                    *EventHandle[*adapter.GroupMuteEvent]
-	PrivateMessageEvent               *EventHandle[*message.PrivateMessage]
+	PrivateMessageEvent               *EventHandle[*adapter.PrivateMessage]
 	FriendMessageRecalledEvent        *EventHandle[*adapter.FriendMessageRecalledEvent]
 	DisconnectedEvent                 *EventHandle[*adapter.ClientDisconnectedEvent]
-	SelfGroupMessageEvent             *EventHandle[*message.GroupMessage]
-	SelfPrivateMessageEvent           *EventHandle[*message.PrivateMessage]
+	SelfGroupMessageEvent             *EventHandle[*adapter.GroupMessage]
+	SelfPrivateMessageEvent           *EventHandle[*adapter.PrivateMessage]
 	GroupMemberJoinEvent              *EventHandle[*adapter.MemberJoinGroupEvent]
 	GroupMemberLeaveEvent             *EventHandle[*adapter.MemberLeaveGroupEvent]
 	GroupInvitedEvent                 *EventHandle[*adapter.GroupInvitedRequest]
@@ -309,13 +309,13 @@ func Init() {
 		start:                             false,
 		QQClient:                          nil,
 		GroupMessageRecalledEvent:         &EventHandle[*adapter.GroupMessageRecalledEvent]{},
-		GroupMessageEvent:                 &EventHandle[*message.GroupMessage]{},
+		GroupMessageEvent:                 &EventHandle[*adapter.GroupMessage]{},
 		GroupMuteEvent:                    &EventHandle[*adapter.GroupMuteEvent]{},
-		PrivateMessageEvent:               &EventHandle[*message.PrivateMessage]{},
+		PrivateMessageEvent:               &EventHandle[*adapter.PrivateMessage]{},
 		FriendMessageRecalledEvent:        &EventHandle[*adapter.FriendMessageRecalledEvent]{},
 		DisconnectedEvent:                 &EventHandle[*adapter.ClientDisconnectedEvent]{},
-		SelfGroupMessageEvent:             &EventHandle[*message.GroupMessage]{},
-		SelfPrivateMessageEvent:           &EventHandle[*message.PrivateMessage]{},
+		SelfGroupMessageEvent:             &EventHandle[*adapter.GroupMessage]{},
+		SelfPrivateMessageEvent:           &EventHandle[*adapter.PrivateMessage]{},
 		GroupMemberJoinEvent:              &EventHandle[*adapter.MemberJoinGroupEvent]{},
 		GroupMemberLeaveEvent:             &EventHandle[*adapter.MemberLeaveGroupEvent]{},
 		GroupInvitedEvent:                 &EventHandle[*adapter.GroupInvitedRequest]{},
@@ -516,24 +516,24 @@ func (bot *Bot) Device() interface{} {
 	return nil
 }
 
-func (bot *Bot) DispatchGroupMessage(msg *message.GroupMessage) {
-	logger.Debugf("DispatchGroupMessage called: group=%d, user=%d, bot=%p, GroupMessageEvent=%p", msg.GroupCode, msg.Sender.Uin, bot, bot.GroupMessageEvent)
+func (bot *Bot) DispatchGroupMessage(msg *adapter.GroupMessage) {
+	logger.Debugf("DispatchGroupMessage called: group=%d, user=%d, bot=%p, GroupMessageEvent=%p", msg.GroupCode, msg.Sender.UserID, bot, bot.GroupMessageEvent)
 	if bot.GroupMessageEvent != nil {
 		logger.Debugf("Dispatching to GroupMessageEvent")
 		bot.GroupMessageEvent.Dispatch(msg)
 	} else {
 		logger.Warn("GroupMessageEvent is nil!")
 	}
-	if bot.SelfGroupMessageEvent != nil && msg.Sender.Uin == bot.GetSelfID() {
+	if bot.SelfGroupMessageEvent != nil && msg.Sender.UserID == bot.GetSelfID() {
 		bot.SelfGroupMessageEvent.Dispatch(msg)
 	}
 }
 
-func (bot *Bot) DispatchPrivateMessage(msg *message.PrivateMessage) {
+func (bot *Bot) DispatchPrivateMessage(msg *adapter.PrivateMessage) {
 	if bot.PrivateMessageEvent != nil {
 		bot.PrivateMessageEvent.Dispatch(msg)
 	}
-	if bot.SelfPrivateMessageEvent != nil && msg.Sender.Uin == bot.GetSelfID() {
+	if bot.SelfPrivateMessageEvent != nil && msg.Sender.UserID == bot.GetSelfID() {
 		bot.SelfPrivateMessageEvent.Dispatch(msg)
 	}
 }

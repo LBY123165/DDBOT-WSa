@@ -16,8 +16,8 @@ import (
 )
 
 type BotEventDispatcher interface {
-	DispatchGroupMessage(msg *message.GroupMessage)
-	DispatchPrivateMessage(msg *message.PrivateMessage)
+	DispatchGroupMessage(msg *GroupMessage)
+	DispatchPrivateMessage(msg *PrivateMessage)
 	DispatchGroupRecall(event *GroupMessageRecalledEvent)
 	DispatchFriendRecall(event *FriendMessageRecalledEvent)
 	DispatchGroupMute(event *GroupMuteEvent)
@@ -1397,29 +1397,27 @@ func (m *Messenger) handleGroupMessage(event *GroupMessageEvent) {
 	m.groupMsgCount.Add(1)
 	messengerLogger.Debugf("handleGroupMessage called: group=%d, user=%d, msgID=%d", event.GroupID, event.UserID, event.MessageID)
 
-	sender := &message.Sender{
-		Uin:      event.UserID,
-		Nickname: "",
-		IsFriend: false,
+	sender := &SenderInfo{
+		UserID: event.UserID,
 	}
 	group := m.FindGroup(event.GroupID)
 	if group != nil {
 		member := group.FindMember(event.UserID)
 		if member != nil {
 			sender.Nickname = member.Nickname
-			sender.CardName = member.CardName
+			sender.Card = member.CardName
 		}
 	}
 
 	elements := m.parseMessageSegments(event.Message)
 
-	msg := &message.GroupMessage{
-		Id:        int32(event.MessageID),
+	msg := &GroupMessage{
+		ID:        int64(event.MessageID),
 		GroupCode: event.GroupID,
 		GroupName: group.Name,
 		Sender:    sender,
-		Time:      int32(event.Time),
-		Elements:  elements,
+		Time:      event.Time,
+		Elements:  AdaptElements(elements),
 	}
 
 	messengerLogger.Debugf("收到群 %d 内 %d 的消息", event.GroupID, event.UserID)
@@ -1445,17 +1443,16 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 	}
 
 	elements := m.parseMessageSegments(event.Message)
-	msg := &message.PrivateMessage{
-		Id:     int32(event.MessageID),
-		Target: event.UserID,
+	msg := &PrivateMessage{
+		ID:     int64(event.MessageID),
+		UserID: event.UserID,
 		Self:   event.SelfID,
-		Sender: &message.Sender{
-			Uin:      event.UserID,
+		Sender: &SenderInfo{
+			UserID:   event.UserID,
 			Nickname: nickname,
-			IsFriend: isFriend,
 		},
-		Time:     int32(event.Time),
-		Elements: elements,
+		Time:     event.Time,
+		Elements: AdaptElements(elements),
 	}
 
 	messengerLogger.Debugf("收到 %d 的私聊消息", event.UserID)

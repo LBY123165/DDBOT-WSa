@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/utils"
 )
@@ -22,12 +23,12 @@ type Parser struct {
 	o             sync.Once
 }
 
-func (p *Parser) Parse(elems []message.IMessageElement) {
+func (p *Parser) Parse(elems []adapter.IMessageElement) {
 	if len(elems) > 0 {
-		var search []message.IMessageElement
-		if elems[0].Type() == message.Reply {
+		var search []adapter.IMessageElement
+		if elems[0].Type() == adapter.ElementTypeReply {
 			if len(elems) > 1 {
-				if elems[1].Type() == message.At {
+				if elems[1].Type() == adapter.ElementTypeAt {
 					search = elems[2:]
 				} else {
 					search = elems[1:]
@@ -36,32 +37,42 @@ func (p *Parser) Parse(elems []message.IMessageElement) {
 		} else {
 			search = elems[:]
 		}
-		if len(search) > 0 && search[0].Type() == message.At {
-			p.AtTarget = search[0].(*message.AtElement).Target
+		if len(search) > 0 && search[0].Type() == adapter.ElementTypeAt {
+			if a, ok := search[0].(*adapter.MessageElementAdapter); ok {
+				if atElem, ok := a.Elem.(*message.AtElement); ok {
+					p.AtTarget = atElem.Target
+				}
+			}
 			search = search[1:]
 		}
 		var afterCmd = false
 		for _, e := range search {
-			if afterCmd && e.Type() == message.At {
-				p.AtArgs = append(p.AtArgs, e.(*message.AtElement).Target)
+			if afterCmd && e.Type() == adapter.ElementTypeAt {
+				if a, ok := e.(*adapter.MessageElementAdapter); ok {
+					if atElem, ok := a.Elem.(*message.AtElement); ok {
+						p.AtArgs = append(p.AtArgs, atElem.Target)
+					}
+				}
 			}
-			if !afterCmd && e.Type() != message.At {
+			if !afterCmd && e.Type() != adapter.ElementTypeAt {
 				afterCmd = true
 			}
 		}
 	}
 	var buf strings.Builder
-	textElems := utils.MessageFilter(elems, func(element message.IMessageElement) bool {
-		return element.Type() == message.Text
-	})
-	for _, element := range textElems {
-		if te, ok := element.(*message.TextElement); ok {
-			text := strings.TrimSpace(strings.Replace(te.Content, " ", " ", -1))
-			if text == "" {
-				continue
+	for _, element := range elems {
+		if element.Type() != adapter.ElementTypeText {
+			continue
+		}
+		if a, ok := element.(*adapter.MessageElementAdapter); ok {
+			if te, ok := a.Elem.(*message.TextElement); ok {
+				text := strings.TrimSpace(strings.Replace(te.Content, " ", " ", -1))
+				if text == "" {
+					continue
+				}
+				buf.WriteString(text)
+				buf.WriteString(" ")
 			}
-			buf.WriteString(text)
-			buf.WriteString(" ")
 		}
 	}
 	splitStr := utils.ArgSplit(strings.TrimSpace(buf.String()))

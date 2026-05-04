@@ -14,6 +14,7 @@ import (
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/Sora233/sliceutil"
 	"github.com/alecthomas/kong"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
@@ -26,12 +27,12 @@ import (
 )
 
 type LspPrivateCommand struct {
-	msg *message.PrivateMessage
+	msg *adapter.PrivateMessage
 
 	*Runtime
 }
 
-func NewLspPrivateCommand(l *Lsp, msg *message.PrivateMessage) *LspPrivateCommand {
+func NewLspPrivateCommand(l *Lsp, msg *adapter.PrivateMessage) *LspPrivateCommand {
 	c := &LspPrivateCommand{
 		msg:     msg,
 		Runtime: NewRuntime(l),
@@ -1437,7 +1438,7 @@ func (c *LspPrivateCommand) StatusCommand() {
 func (c *LspPrivateCommand) DebugCheck() bool {
 	var ok bool
 	if c.debug {
-		if sliceutil.Contains(config.GlobalConfig.GetStringSlice("debug.uin"), strconv.FormatInt(c.msg.Sender.Uin, 10)) {
+		if sliceutil.Contains(config.GlobalConfig.GetStringSlice("debug.uin"), strconv.FormatInt(c.msg.Sender.UserID, 10)) {
 			ok = true
 		}
 	} else {
@@ -1516,7 +1517,10 @@ func (c *LspPrivateCommand) templateMsg(name string, data map[string]interface{}
 }
 
 func (c *LspPrivateCommand) sender() *message.Sender {
-	return c.msg.Sender
+	return &message.Sender{
+		Uin:      c.msg.Sender.UserID,
+		Nickname: c.msg.Sender.Nickname,
+	}
 }
 func (c *LspPrivateCommand) uin() int64 {
 	return c.sender().Uin

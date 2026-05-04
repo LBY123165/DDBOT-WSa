@@ -314,6 +314,14 @@ type SenderInfo struct {
 	Role     string
 }
 
+// DisplayName returns the display name for the sender.
+func (s *SenderInfo) DisplayName() string {
+	if s.Card != "" {
+		return s.Card
+	}
+	return s.Nickname
+}
+
 // ForwardOptions 合并转发消息的顶层参数
 // 对应 onebot-v11 send_group_forward_msg API 的顶层字段
 type ForwardOptions struct {

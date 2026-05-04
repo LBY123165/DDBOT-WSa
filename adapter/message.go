@@ -82,6 +82,11 @@ type ReplySegment struct {
 	Time     int32
 }
 
+func (s *ReplySegment) Type() ElementType { return ElementTypeReply }
+func (s *ReplySegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
+}
+
 // VoiceSegment represents a voice message element.
 type VoiceSegment struct {
 	Name string

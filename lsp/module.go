@@ -597,11 +597,11 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupMessageEvent.Subscribe(func(msg *message.GroupMessage) {
+	bot.GroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, msg.Id, msg.Elements); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), adapter.ToMessageElements(msg.Elements)); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 		if !l.started.Load() {
@@ -620,11 +620,11 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.SelfGroupMessageEvent.Subscribe(func(msg *message.GroupMessage) {
+	bot.SelfGroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, msg.Id, msg.Elements); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), adapter.ToMessageElements(msg.Elements)); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 	})
@@ -656,7 +656,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.PrivateMessageEvent.Subscribe(func(msg *message.PrivateMessage) {
+	bot.PrivateMessageEvent.Subscribe(func(msg *adapter.PrivateMessage) {
 		if !l.started.Load() {
 			return
 		}

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/template"
 	"go.uber.org/atomic"
@@ -29,12 +30,12 @@ import (
 )
 
 type LspGroupCommand struct {
-	msg *message.GroupMessage
+	msg *adapter.GroupMessage
 
 	*Runtime
 }
 
-func NewLspGroupCommand(l *Lsp, msg *message.GroupMessage) *LspGroupCommand {
+func NewLspGroupCommand(l *Lsp, msg *adapter.GroupMessage) *LspGroupCommand {
 	c := &LspGroupCommand{
 		Runtime: NewRuntime(l, l.PermissionStateManager.CheckGroupSilence(msg.GroupCode)),
 		msg:     msg,
@@ -855,28 +856,29 @@ func (lgc *LspGroupCommand) ReverseCommand() {
 	}
 
 	for _, e := range lgc.msg.Elements {
-		if e.Type() == message.Image {
-			switch ie := e.(type) {
-			case *message.GroupImageElement:
-				lgc.reserveGif(ie.Url)
-				return
-			default:
-				log.Errorf("cast to ImageElement failed")
-				lgc.textReply("失败")
-				return
-			}
-		} else if e.Type() == message.Reply {
-			if re, ok := e.(*message.ReplyElement); ok {
-				urls := lgc.l.LspStateManager.GetMessageImageUrl(lgc.groupCode(), re.ReplySeq)
-				if len(urls) >= 1 {
-					lgc.reserveGif(urls[0])
+		if e.Type() == adapter.ElementTypeImage {
+			if a, ok := e.(*adapter.MessageElementAdapter); ok {
+				if ie, ok := a.Elem.(*message.GroupImageElement); ok {
+					lgc.reserveGif(ie.Url)
 					return
 				}
-			} else {
-				log.Errorf("cast to ReplyElement failed")
-				lgc.textReply("失败")
-				return
 			}
+			log.Errorf("cast to ImageElement failed")
+			lgc.textReply("失败")
+			return
+		} else if e.Type() == adapter.ElementTypeReply {
+			if a, ok := e.(*adapter.MessageElementAdapter); ok {
+				if re, ok := a.Elem.(*message.ReplyElement); ok {
+					urls := lgc.l.LspStateManager.GetMessageImageUrl(lgc.groupCode(), re.ReplySeq)
+					if len(urls) >= 1 {
+						lgc.reserveGif(urls[0])
+						return
+					}
+				}
+			}
+			log.Errorf("cast to ReplyElement failed")
+			lgc.textReply("失败")
+			return
 		}
 	}
 	log.Debug("no image found")
@@ -984,7 +986,7 @@ func (lgc *LspGroupCommand) reserveGif(url string) {
 }
 
 func (lgc *LspGroupCommand) uin() int64 {
-	return lgc.msg.Sender.Uin
+	return lgc.msg.Sender.UserID
 }
 
 func (lgc *LspGroupCommand) displayName() string {
@@ -1061,7 +1063,13 @@ func (lgc *LspGroupCommand) textSendF(format string, args ...interface{}) *messa
 
 func (lgc *LspGroupCommand) reply(msg *mmsg.MSG) *message.GroupMessage {
 	m := mmsg.NewMSG()
-	m.Append(message.NewReply(lgc.msg))
+	// Use adapter types to build the reply reference
+	replyElem := adapter.ToMessageElements([]adapter.IMessageElement{&adapter.ReplySegment{
+		ReplySeq: int32(lgc.msg.ID),
+		Sender:   lgc.msg.Sender.UserID,
+		GroupID:  lgc.msg.GroupCode,
+	}})
+	m.Append(replyElem...)
 	m.Append(msg.Elements()...)
 	return lgc.send(m)
 }
@@ -1074,7 +1082,7 @@ func (lgc *LspGroupCommand) sendChain(msg *mmsg.MSG) []*message.GroupMessage {
 	return lgc.l.GM(lgc.l.SendMsg(msg, mmsg.NewGroupTarget(lgc.groupCode())))
 }
 
-func (lgc *LspGroupCommand) sender() *message.Sender {
+func (lgc *LspGroupCommand) sender() *adapter.SenderInfo {
 	return lgc.msg.Sender
 }
 
@@ -1091,7 +1099,7 @@ func (lgc *LspGroupCommand) commonTemplateData() map[string]interface{} {
 		"msg":         lgc.msg,
 		"group_code":  lgc.groupCode(),
 		"group_name":  lgc.groupName(),
-		"member_code": lgc.sender().Uin,
+		"member_code": lgc.sender().UserID,
 		"member_name": lgc.sender().DisplayName(),
 		"command":     CommandMaps,
 	}
@@ -1163,6 +1171,10 @@ func (lgc *LspGroupCommand) NewMessageContext(log *logrus.Entry) *MessageContext
 		}
 		return nil
 	}
-	ctx.Sender = lgc.sender()
+	ctx.Sender = &message.Sender{
+		Uin:      lgc.msg.Sender.UserID,
+		Nickname: lgc.msg.Sender.Nickname,
+		CardName: lgc.msg.Sender.Card,
+	}
 	return ctx
 }

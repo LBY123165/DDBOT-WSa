@@ -13,7 +13,6 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/utils/msgstringer"
 	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/sirupsen/logrus"
 
 	"github.com/Sora233/MiraiGo-Template/bot"
@@ -122,16 +121,16 @@ func (m *logging) Stop(b *bot.Bot, wg *sync.WaitGroup) {
 	// 在此处应该释放相应的资源或者对状态进行保存
 }
 
-func logGroupMessage(msg *message.GroupMessage) {
-	name := msg.Sender.CardName
+func logGroupMessage(msg *adapter.GroupMessage) {
+	name := msg.Sender.Card
 	if name == "" {
 		name = msg.Sender.Nickname
 	}
-	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.Uin, msgstringer.MsgToString(msg.Elements), msg.Id)
+	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.UserID, msgstringer.MsgToString(adapter.ToMessageElements(msg.Elements)), msg.ID)
 }
 
-func logPrivateMessage(msg *message.PrivateMessage) {
-	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.Uin, msgstringer.MsgToString(msg.Elements), msg.Id)
+func logPrivateMessage(msg *adapter.PrivateMessage) {
+	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.UserID, msgstringer.MsgToString(adapter.ToMessageElements(msg.Elements)), msg.ID)
 }
 
 func logFriendMessageRecallEvent(event *adapter.FriendMessageRecalledEvent) {
@@ -198,7 +197,7 @@ func registerLog(b *bot.Bot) {
 		logGroupMessageRecallEvent(event)
 	})
 
-	b.GroupMessageEvent.Subscribe(func(msg *message.GroupMessage) {
+	b.GroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
 		logGroupMessage(msg)
 	})
 
@@ -206,7 +205,7 @@ func registerLog(b *bot.Bot) {
 		logGroupMuteEvent(event)
 	})
 
-	b.PrivateMessageEvent.Subscribe(func(privateMessage *message.PrivateMessage) {
+	b.PrivateMessageEvent.Subscribe(func(privateMessage *adapter.PrivateMessage) {
 		logPrivateMessage(privateMessage)
 	})
 
