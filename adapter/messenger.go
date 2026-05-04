@@ -1397,30 +1397,29 @@ func (m *Messenger) handleGroupMessage(event *GroupMessageEvent) {
 	m.groupMsgCount.Add(1)
 	messengerLogger.Debugf("handleGroupMessage called: group=%d, user=%d, msgID=%d", event.GroupID, event.UserID, event.MessageID)
 
-	msg := &message.GroupMessage{
-
-		Id:        int32(event.MessageID),
-		GroupCode: event.GroupID,
-		GroupName: "",
-		Sender: &message.Sender{
-			Uin:      event.UserID,
-			Nickname: "",
-			IsFriend: false,
-		},
-		Time: int32(event.Time),
+	sender := &message.Sender{
+		Uin:      event.UserID,
+		Nickname: "",
+		IsFriend: false,
+	}
+	group := m.FindGroup(event.GroupID)
+	if group != nil {
+		member := group.FindMember(event.UserID)
+		if member != nil {
+			sender.Nickname = member.Nickname
+			sender.CardName = member.CardName
+		}
 	}
 
 	elements := m.parseMessageSegments(event.Message)
-	msg.Elements = elements
 
-	group := m.FindGroup(event.GroupID)
-	if group != nil {
-		msg.GroupName = group.Name
-		member := group.FindMember(event.UserID)
-		if member != nil {
-			msg.Sender.Nickname = member.Nickname
-			msg.Sender.CardName = member.CardName
-		}
+	msg := &message.GroupMessage{
+		Id:        int32(event.MessageID),
+		GroupCode: event.GroupID,
+		GroupName: group.Name,
+		Sender:    sender,
+		Time:      int32(event.Time),
+		Elements:  elements,
 	}
 
 	messengerLogger.Debugf("收到群 %d 内 %d 的消息", event.GroupID, event.UserID)
@@ -1444,6 +1443,8 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 			}
 		}
 	}
+
+	elements := m.parseMessageSegments(event.Message)
 	msg := &message.PrivateMessage{
 		Id:     int32(event.MessageID),
 		Target: event.UserID,
@@ -1453,11 +1454,9 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 			Nickname: nickname,
 			IsFriend: isFriend,
 		},
-		Time: int32(event.Time),
+		Time:     int32(event.Time),
+		Elements: elements,
 	}
-
-	elements := m.parseMessageSegments(event.Message)
-	msg.Elements = elements
 
 	messengerLogger.Debugf("收到 %d 的私聊消息", event.UserID)
 

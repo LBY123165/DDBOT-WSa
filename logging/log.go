@@ -7,13 +7,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/cnxysoft/DDBOT-WSa/utils/msgstringer"
 	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
 	rotatelogs "github.com/lestrrat-go/file-rotatelogs"
+	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/sirupsen/logrus"
 
 	"github.com/Sora233/MiraiGo-Template/bot"
@@ -198,8 +198,8 @@ func registerLog(b *bot.Bot) {
 		logGroupMessageRecallEvent(event)
 	})
 
-	b.GroupMessageEvent.Subscribe(func(groupMessage *message.GroupMessage) {
-		logGroupMessage(groupMessage)
+	b.GroupMessageEvent.Subscribe(func(msg *message.GroupMessage) {
+		logGroupMessage(msg)
 	})
 
 	b.GroupMuteEvent.Subscribe(func(event *adapter.GroupMuteEvent) {

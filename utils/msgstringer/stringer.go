@@ -9,14 +9,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
-// 实际上at在这里
+// MsgToString converts message elements to a human-readable string.
 func MsgToString(elements []message.IMessageElement) string {
 	var res strings.Builder
 	for i, elem := range elements {
 		if elem == nil {
 			continue
 		}
-		// Print each element's type for debugging
 		logger.Debugf(`Element %d is of type %T\n`, i, elem)
 
 		switch e := elem.(type) {
