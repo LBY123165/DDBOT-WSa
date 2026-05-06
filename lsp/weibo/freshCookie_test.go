@@ -12,7 +12,7 @@ func TestFreshCookie(t *testing.T) {
 	var cookies []*http.Cookie
 	var err error
 	localutils.Retry(5, time.Second, func() bool {
-		cookies, err = FreshCookie()
+		cookies, err = FreshCookieGuest()
 		return err == nil
 	})
 	assert.Nil(t, err)
