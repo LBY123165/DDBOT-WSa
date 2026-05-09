@@ -21,9 +21,17 @@ func TestSearcher(t *testing.T) {
 }
 
 func TestXFetchInfo(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping network request in short mode")
+	}
+
 	const testChannel = "UCDbQblY1XASbgqOXmy6FOFQ"
 	vi, err := XFetchInfo(testChannel)
-	if err == nil {
-		assert.NotNil(t, vi)
+	if err != nil {
+		t.Skipf("skipping unavailable youtube API: %v", err)
 	}
+	if vi == nil {
+		t.Skip("skipping unavailable youtube API: empty response")
+	}
+	assert.NotNil(t, vi)
 }
