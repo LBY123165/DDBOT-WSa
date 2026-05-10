@@ -9,10 +9,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/ffmpeg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool"
@@ -336,7 +337,7 @@ func (n *ConcernNewsNotify) fallbackMSG() *mmsg.MSG {
 		// 通过回复之前消息的方式简化推送
 		msg, _ := n.concern.GetNotifyMsg(n.GroupCode, n.compactKey)
 		if msg != nil {
-			m.Append(message.NewReply(msg))
+			m.Append(&adapter.ReplySegment{ReplySeq: msg.Id, Id: strconv.Itoa(int(msg.Id)), Sender: msg.Sender.Uin, Time: msg.Time})
 		}
 		logger.WithField("compact_key", n.compactKey).Debug("compact notify")
 		Tips := "转发"

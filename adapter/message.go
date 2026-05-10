@@ -7,22 +7,22 @@ type ElementType int
 
 //go:generate stringer -type ElementType -linecomment
 const (
-	ElementTypeText          ElementType = iota // 文本
-	ElementTypeImage                            // 图片
-	ElementTypeFace                             // 表情
-	ElementTypeAt                               // 艾特
-	ElementTypeReply                            // 回复
-	ElementTypeService                         // 服务
-	ElementTypeForward                         // 转发
-	ElementTypeFile                            // 文件
-	ElementTypeVoice                           // 语音
-	ElementTypeVideo                           // 视频
-	ElementTypeLightApp                        // 轻应用
-	ElementTypeRedBag                          // 红包
-	ElementTypeDice                           // 骰子
-	ElementTypeFingerGuessing                  // 猜拳
-	ElementTypeMarketFace                      // 表情包
-	ElementTypeAnimatedSticker                 // 动态表情
+	ElementTypeText            ElementType = iota // 文本
+	ElementTypeImage                              // 图片
+	ElementTypeFace                               // 表情
+	ElementTypeAt                                 // 艾特
+	ElementTypeReply                              // 回复
+	ElementTypeService                            // 服务
+	ElementTypeForward                            // 转发
+	ElementTypeFile                               // 文件
+	ElementTypeVoice                              // 语音
+	ElementTypeVideo                              // 视频
+	ElementTypeLightApp                           // 轻应用
+	ElementTypeRedBag                             // 红包
+	ElementTypeDice                               // 骰子
+	ElementTypeFingerGuessing                     // 猜拳
+	ElementTypeMarketFace                         // 表情包
+	ElementTypeAnimatedSticker                    // 动态表情
 )
 
 // IMessageElement is the core message element interface.
@@ -36,6 +36,15 @@ type IMessageElement interface {
 // SendingMessage is a message ready for sending.
 type SendingMessage struct {
 	Elements []IMessageElement
+}
+
+func (s *SendingMessage) FirstOrNil(predicate func(IMessageElement) bool) IMessageElement {
+	for _, e := range s.Elements {
+		if predicate(e) {
+			return e
+		}
+	}
+	return nil
 }
 
 // Append appends elements to the sending message.
@@ -61,16 +70,31 @@ type ImageSegment struct {
 	Url  string
 }
 
+func (s *ImageSegment) Type() ElementType { return ElementTypeImage }
+func (s *ImageSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
+}
+
 // FaceSegment represents a face (emoji) message element.
 type FaceSegment struct {
 	Index int32
 	Name  string
 }
 
+func (s *FaceSegment) Type() ElementType { return ElementTypeFace }
+func (s *FaceSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
+}
+
 // AtSegment represents an @ mention message element.
 type AtSegment struct {
 	Target  int64
 	Display string
+}
+
+func (s *AtSegment) Type() ElementType { return ElementTypeAt }
+func (s *AtSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
 }
 
 // ReplySegment represents a reply message element.
@@ -96,15 +120,25 @@ type VoiceSegment struct {
 	Data []byte
 }
 
+func (s *VoiceSegment) Type() ElementType { return ElementTypeVoice }
+func (s *VoiceSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
+}
+
 // VideoSegment represents a video message element.
 type VideoSegment struct {
 	Name      string
-	Uuid     []byte
-	Size     int32
+	Uuid      []byte
+	Size      int32
 	ThumbSize int32
-	Md5      []byte
-	ThumbMd5 []byte
-	Url      string
+	Md5       []byte
+	ThumbMd5  []byte
+	Url       string
+}
+
+func (s *VideoSegment) Type() ElementType { return ElementTypeVideo }
+func (s *VideoSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
 }
 
 // FileSegment represents a file message element.
@@ -115,6 +149,11 @@ type FileSegment struct {
 	Id    string
 	Url   string
 	Busid int32
+}
+
+func (s *FileSegment) Type() ElementType { return ElementTypeFile }
+func (s *FileSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
 }
 
 // ForwardSegment represents a forward message element.
@@ -159,11 +198,11 @@ type GroupMessage struct {
 
 // PrivateMessage represents a private message event.
 type PrivateMessage struct {
-	ID      int64
-	UserID  int64
-	Self    int64
-	Sender  *SenderInfo
-	Time    int64
+	ID       int64
+	UserID   int64
+	Self     int64
+	Sender   *SenderInfo
+	Time     int64
 	Elements []IMessageElement
 }
 
@@ -235,10 +274,42 @@ func AdaptElements(elems []message.IMessageElement) []IMessageElement {
 // ToMessageElements converts []adapter.IMessageElement back to []message.IMessageElement.
 // This is used at boundaries where an older interface expects []message.IMessageElement.
 func ToMessageElements(elems []IMessageElement) []message.IMessageElement {
-	result := make([]message.IMessageElement, len(elems))
-	for i, e := range elems {
+	result := make([]message.IMessageElement, 0, len(elems))
+	for _, e := range elems {
+		if e == nil {
+			continue
+		}
 		if a, ok := e.(*MessageElementAdapter); ok {
-			result[i] = a.Elem
+			result = append(result, a.Elem)
+			continue
+		}
+		switch v := e.(type) {
+		case *TextSegment:
+			result = append(result, message.NewText(v.Content))
+		case *ImageSegment:
+			img := message.NewImage(v.File)
+			img.Url = v.Url
+			result = append(result, img)
+		case *FaceSegment:
+			result = append(result, message.NewFace(v.Index))
+		case *AtSegment:
+			result = append(result, &message.AtElement{Target: v.Target, Display: v.Display})
+		case *ReplySegment:
+			result = append(result, &message.ReplyElement{ReplySeq: v.ReplySeq, Id: v.Id, Sender: v.Sender, GroupID: v.GroupID, Time: v.Time})
+		case *VoiceSegment:
+			record := message.NewRecord(v.Url)
+			record.Name = v.Name
+			result = append(result, record)
+		case *VideoSegment:
+			video := message.NewVideo(v.Url)
+			video.Name = v.Name
+			result = append(result, video)
+		case *FileSegment:
+			file := message.NewFile(v.Url)
+			file.Name = v.Name
+			file.Path = v.Path
+			file.Url = v.Url
+			result = append(result, file)
 		}
 	}
 	return result

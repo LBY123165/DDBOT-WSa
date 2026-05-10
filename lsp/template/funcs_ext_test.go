@@ -338,7 +338,7 @@ func runTemplateWithExt(template string, data map[string]interface{}) (string, e
 	var m = mmsg.NewMSG()
 	var tmpl = Must(New("").Funcs(FuncMap(funcsExt)).Parse(template))
 	var err = tmpl.Execute(m, data)
-	return msgstringer.MsgToString(m.Elements()), err
+	return msgstringer.AdapterMsgToString(m.Elements()), err
 }
 
 // 辅助函数：比较年月日和时分

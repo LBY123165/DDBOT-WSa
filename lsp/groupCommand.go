@@ -348,7 +348,7 @@ func (lgc *LspGroupCommand) SetuCommand(r18 bool) {
 				}
 				imgSubCount += 1
 				img := imgs[i+index]
-				msg.Append(groupImage)
+				msg.Append(&adapter.MessageElementAdapter{Elem: groupImage})
 				if loliconImage, ok := img.(*lolicon_pool.Setu); ok {
 					log.WithFields(logrus.Fields{
 						"Author":    loliconImage.Author,
@@ -1064,12 +1064,12 @@ func (lgc *LspGroupCommand) textSendF(format string, args ...interface{}) *messa
 func (lgc *LspGroupCommand) reply(msg *mmsg.MSG) *message.GroupMessage {
 	m := mmsg.NewMSG()
 	// Use adapter types to build the reply reference
-	replyElem := adapter.ToMessageElements([]adapter.IMessageElement{&adapter.ReplySegment{
+	replyElem := &adapter.ReplySegment{
 		ReplySeq: int32(lgc.msg.ID),
 		Sender:   lgc.msg.Sender.UserID,
 		GroupID:  lgc.msg.GroupCode,
-	}})
-	m.Append(replyElem...)
+	}
+	m.Append(replyElem)
 	m.Append(msg.Elements()...)
 	return lgc.send(m)
 }

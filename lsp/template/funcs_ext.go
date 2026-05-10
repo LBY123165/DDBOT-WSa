@@ -513,7 +513,7 @@ func setCooldown(ttlUnit string, keys ...interface{}) bool {
 
 type ddError struct {
 	ddErrType string
-	e         message.IMessageElement
+	e         adapter.IMessageElement
 	err       error
 }
 
@@ -532,9 +532,11 @@ func abort(e ...interface{}) interface{} {
 		aerr := &ddError{ddErrType: "abort", err: fmt.Errorf("abort")}
 		switch s := i.(type) {
 		case string:
-			aerr.e = message.NewText(s)
-		case message.IMessageElement:
+			aerr.e = &adapter.TextSegment{Content: s}
+		case adapter.IMessageElement:
 			aerr.e = s
+		case message.IMessageElement:
+			aerr.e = &adapter.MessageElementAdapter{Elem: s}
 		default:
 			panic("template: abort with invalid e")
 		}

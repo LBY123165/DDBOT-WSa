@@ -6,12 +6,14 @@ package template
 
 import (
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"reflect"
 	"runtime"
 	"strings"
 	"text/template/parse"
+
+	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 )
 
 // maxExecDepth specifies the maximum stack depth of templates within
@@ -673,6 +675,7 @@ var (
 	fmtStringerType    = reflect.TypeOf((*fmt.Stringer)(nil)).Elem()
 	reflectValueType   = reflect.TypeOf((*reflect.Value)(nil)).Elem()
 	miraigoElementType = reflect.TypeOf((*message.IMessageElement)(nil)).Elem()
+	adapterElementType = reflect.TypeOf((*adapter.IMessageElement)(nil)).Elem()
 )
 
 // evalCall executes a function or method call. If it's a method, fun already has the receiver bound, so
@@ -975,8 +978,10 @@ func (s *state) printValue(n parse.Node, v reflect.Value) {
 		s.errorf("can't print %s of type %s", n, v.Type())
 	}
 	switch e := iface.(type) {
-	case message.IMessageElement:
+	case adapter.IMessageElement:
 		s.wr.Append(e)
+	case message.IMessageElement:
+		s.wr.Append(&adapter.MessageElementAdapter{Elem: e})
 	default:
 		s.wr.Text(fmt.Sprint(iface))
 	}
@@ -990,6 +995,13 @@ func printableValue(v reflect.Value) (interface{}, bool) {
 	}
 	if !v.IsValid() {
 		return "<no value>", true
+	}
+
+	if v.Type().Implements(adapterElementType) {
+		return v.Interface(), true
+	}
+	if v.CanAddr() && reflect.PtrTo(v.Type()).Implements(adapterElementType) {
+		return v.Addr().Interface(), true
 	}
 
 	if !v.Type().Implements(miraigoElementType) {

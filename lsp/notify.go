@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	lsptelegram "github.com/cnxysoft/DDBOT-WSa/lsp/telegram"
@@ -95,7 +96,7 @@ func (l *Lsp) ConcernNotify() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			if err := l.msgLimit.Acquire(ctx, 1); err != nil {
 				cancel()
-				nLogger.WithField("Content", msgstringer.MsgToString(m.Elements())).
+				nLogger.WithField("Content", msgstringer.AdapterMsgToString(m.Elements())).
 					Errorf("BOT负载过高，推送已积压超过一分钟，将舍弃本次推送。")
 				continue
 			}
@@ -136,9 +137,17 @@ func (l *Lsp) ConcernNotify() {
 							}
 							// 2022/09/24 现在@全员不会再作为单独一条消息
 							// 有@全体成员的消息应该去掉之后重试
-							secondM := mmsg.NewMSGFromGroupMessage(msg)
-							secondM.Drop(func(e message.IMessageElement, _ int) bool {
-								return e.Type() == message.At && e.(*message.AtElement).Target == 0
+							secondM := mmsg.NewMSGFromGroupMessage(&adapter.GroupMessage{Elements: adapter.AdaptElements(msg.Elements)})
+							secondM.Drop(func(e adapter.IMessageElement, _ int) bool {
+								if at, ok := e.(*adapter.AtSegment); ok {
+									return at.Target == 0
+								}
+								legacy, ok := e.(*adapter.MessageElementAdapter)
+								if !ok {
+									return false
+								}
+								at, ok := legacy.Elem.(*message.AtElement)
+								return ok && at.Target == 0
 							})
 
 							secondRes := l.GM(l.SendMsg(secondM, target))

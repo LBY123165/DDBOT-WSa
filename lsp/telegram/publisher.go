@@ -1,22 +1,23 @@
 package telegram
 
 import (
-    "context"
-    "encoding/base64"
-    "net"
-    "net/http"
-    "net/url"
-    "os"
-    "strings"
-    "sync"
-    "time"
+	"context"
+	"encoding/base64"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
 
-    "github.com/Mrs4s/MiraiGo/message"
-    "github.com/Sora233/MiraiGo-Template/config"
-    "github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
-    "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-    "github.com/sirupsen/logrus"
-    xproxy "golang.org/x/net/proxy"
+	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/sirupsen/logrus"
+	xproxy "golang.org/x/net/proxy"
 )
 
 var (
@@ -270,10 +271,14 @@ func parseInt64(s string) int64 {
 	return sign * n
 }
 
-func sendToTelegram(chatID int64, sm *message.SendingMessage) {
+func sendToTelegram(chatID int64, sm *adapter.SendingMessage) {
 	if sm == nil || bot == nil {
 		return
 	}
+	sendToTelegramMessage(chatID, &message.SendingMessage{Elements: adapter.ToMessageElements(sm.Elements)})
+}
+
+func sendToTelegramMessage(chatID int64, sm *message.SendingMessage) {
 	var tb strings.Builder
 	var images []*message.ImageElement
 	var videos []*message.VideoElement

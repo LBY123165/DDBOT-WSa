@@ -1057,12 +1057,13 @@ func (l *Lsp) GetImageFromPool(options ...image_pool.OptionFunc) ([]image_pool.I
 	return l.pool.Get(options...)
 }
 
-func (l *Lsp) send(msg *message.SendingMessage, target mmsg.Target) interface{} {
+func (l *Lsp) send(msg *adapter.SendingMessage, target mmsg.Target) interface{} {
+	legacyMsg := &message.SendingMessage{Elements: adapter.ToMessageElements(msg.Elements)}
 	switch target.TargetType() {
 	case mmsg.TargetGroup:
-		return l.sendGroupMessage(target.TargetCode(), msg)
+		return l.sendGroupMessage(target.TargetCode(), legacyMsg)
 	case mmsg.TargetPrivate:
-		return l.sendPrivateMessage(target.TargetCode(), msg)
+		return l.sendPrivateMessage(target.TargetCode(), legacyMsg)
 	}
 	panic("unknown target type")
 }

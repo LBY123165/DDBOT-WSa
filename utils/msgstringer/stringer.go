@@ -5,12 +5,59 @@ import (
 	"strings"
 
 	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/davecgh/go-spew/spew"
 )
 
 // MsgToString converts message elements to a human-readable string.
 func MsgToString(elements []message.IMessageElement) string {
+	return msgToString(elements)
+}
+
+// AdapterMsgToString converts adapter message elements to a human-readable string.
+func AdapterMsgToString(elements []adapter.IMessageElement) string {
+	var res strings.Builder
+	for i, elem := range elements {
+		if elem == nil {
+			continue
+		}
+		logger.Debugf(`Element %d is of type %T\n`, i, elem)
+		switch e := elem.(type) {
+		case *adapter.TextSegment:
+			res.WriteString(e.Content)
+		case *adapter.FaceSegment:
+			res.WriteString("[")
+			res.WriteString(e.Name)
+			res.WriteString("]")
+		case *adapter.ImageSegment:
+			res.WriteString("[图片]")
+		case *adapter.AtSegment:
+			if e.Target == 0 {
+				res.WriteString("[艾特全体]")
+			} else {
+				res.WriteString("[艾特:" + strconv.FormatInt(e.Target, 10) + "]")
+			}
+		case *adapter.ReplySegment:
+			res.WriteString("[回复:")
+			res.WriteString(strconv.FormatInt(int64(e.ReplySeq), 10))
+			res.WriteString("]")
+		case *adapter.FileSegment:
+			res.WriteString("[文件]")
+			res.WriteString(e.Name)
+		case *adapter.VideoSegment:
+			res.WriteString("[视频]")
+		case *adapter.VoiceSegment:
+			res.WriteString("[语音]")
+		case *adapter.MessageElementAdapter:
+			res.WriteString(MsgToString([]message.IMessageElement{e.Elem}))
+		default:
+			logger.WithField("content", spew.Sdump(elem)).Debug("found new adapter element")
+		}
+	}
+	return res.String()
+}
+
+func msgToString(elements []message.IMessageElement) string {
 	var res strings.Builder
 	for i, elem := range elements {
 		if elem == nil {
@@ -77,12 +124,6 @@ func MsgToString(elements []message.IMessageElement) string {
 			res.WriteString(e.Content)
 		case *message.VoiceElement, *message.GroupVoiceElement, *message.RecordElement:
 			res.WriteString("[语音]")
-		case *mmsg.ImageBytesElement:
-			res.WriteString("[图片]")
-		case *mmsg.TypedElement:
-			res.WriteString("[自动类型]")
-		case *mmsg.CutElement:
-			res.WriteString("[分割]")
 		case *message.MarketFaceElement:
 			res.WriteString(e.Name)
 		case *message.DiceElement:
