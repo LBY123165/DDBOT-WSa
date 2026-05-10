@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/template"
@@ -443,7 +443,7 @@ type CacheCard struct {
 	msgCache   *mmsg.MSG
 	dynamic    DynamicInfo
 	dynamicRaw map[string]interface{}
-	orgMsg     *message.GroupMessage
+	orgMsg     *adapter.GroupMessage
 }
 
 func NewCacheCard(card *Card) *CacheCard {

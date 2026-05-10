@@ -337,7 +337,11 @@ func (n *ConcernNewsNotify) fallbackMSG() *mmsg.MSG {
 		// 通过回复之前消息的方式简化推送
 		msg, _ := n.concern.GetNotifyMsg(n.GroupCode, n.compactKey)
 		if msg != nil {
-			m.Append(&adapter.ReplySegment{ReplySeq: msg.Id, Id: strconv.Itoa(int(msg.Id)), Sender: msg.Sender.Uin, Time: msg.Time})
+			var sender int64
+			if msg.Sender != nil {
+				sender = msg.Sender.UserID
+			}
+			m.Append(&adapter.ReplySegment{ReplySeq: int32(msg.ID), Id: strconv.Itoa(int(msg.ID)), Sender: sender, Time: int32(msg.Time)})
 		}
 		logger.WithField("compact_key", n.compactKey).Debug("compact notify")
 		Tips := "转发"

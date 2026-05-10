@@ -119,7 +119,7 @@ func (l *Lsp) ConcernNotify() {
 					return
 				}
 
-				msgs := l.GM(l.SendMsg(m, target))
+				msgs := l.AGM(l.SendMsg(m, target))
 				if len(msgs) > 0 {
 					cfg.NotifyAfterCallback(inotify, msgs[0])
 				}
@@ -127,17 +127,25 @@ func (l *Lsp) ConcernNotify() {
 				if atBeforeHook.Pass {
 					var atIdsOnce bool
 					for _, msg := range msgs {
-						if msg.Id == -1 {
+						if msg.ID == -1 {
 							// 检查有没有@全体成员
-							e := utils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
-								return element.Type() == message.At && element.(*message.AtElement).Target == 0
+							e := utils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
+								if at, ok := element.(*adapter.AtSegment); ok {
+									return at.Target == 0
+								}
+								legacy, ok := element.(*adapter.MessageElementAdapter)
+								if !ok {
+									return false
+								}
+								at, ok := legacy.Elem.(*message.AtElement)
+								return ok && at.Target == 0
 							})
 							if len(e) == 0 {
 								continue
 							}
 							// 2022/09/24 现在@全员不会再作为单独一条消息
 							// 有@全体成员的消息应该去掉之后重试
-							secondM := mmsg.NewMSGFromGroupMessage(&adapter.GroupMessage{Elements: adapter.AdaptElements(msg.Elements)})
+							secondM := mmsg.NewMSGFromGroupMessage(&adapter.GroupMessage{Elements: msg.Elements})
 							secondM.Drop(func(e adapter.IMessageElement, _ int) bool {
 								if at, ok := e.(*adapter.AtSegment); ok {
 									return at.Target == 0

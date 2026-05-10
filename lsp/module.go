@@ -1149,6 +1149,28 @@ func (l *Lsp) GM(res []interface{}) []*message.GroupMessage {
 	return result
 }
 
+func (l *Lsp) AGM(res []interface{}) []*adapter.GroupMessage {
+	var result []*adapter.GroupMessage
+	for _, r := range res {
+		msg := r.(*message.GroupMessage)
+		adapterMsg := &adapter.GroupMessage{
+			ID:        int64(msg.Id),
+			GroupCode: msg.GroupCode,
+			Time:      int64(msg.Time),
+			Elements:  adapter.AdaptElements(msg.Elements),
+		}
+		if msg.Sender != nil {
+			adapterMsg.Sender = &adapter.SenderInfo{
+				UserID:   msg.Sender.Uin,
+				Nickname: msg.Sender.Nickname,
+				Card:     msg.Sender.CardName,
+			}
+		}
+		result = append(result, adapterMsg)
+	}
+	return result
+}
+
 func (l *Lsp) PM(res []interface{}) []*message.PrivateMessage {
 	var result []*message.PrivateMessage
 	for _, r := range res {

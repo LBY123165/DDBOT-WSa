@@ -101,6 +101,8 @@ func reply(msg interface{}) *message.ReplyElement {
 	switch e := msg.(type) {
 	case *message.GroupMessage:
 		return message.NewReply(e)
+	case *adapter.GroupMessage:
+		return &message.ReplyElement{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID)), GroupID: e.GroupCode, Time: int32(e.Time)}
 	case *message.PrivateMessage:
 		return message.NewPrivateReply(e)
 	default:
