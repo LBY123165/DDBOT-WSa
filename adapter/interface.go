@@ -302,7 +302,7 @@ type GetMsgResult struct {
 	GroupID    int64
 	UserID     int64
 	RawMessage string
-	Elements   []message.IMessageElement
+	Elements   []IMessageElement
 	Time       int64
 	Sender     *SenderInfo
 }
@@ -331,15 +331,15 @@ type ForwardOptions struct {
 	News    []string // 转发预览文本列表 (LLOneBot/NapCatQQ 支持)
 }
 
-// ConvertToMessageElements converts []MessageSegment to []message.IMessageElement
-func ConvertToMessageElements(segments []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
+// ConvertToMessageElements converts []MessageSegment to []adapter.IMessageElement
+func ConvertToMessageElements(segments []MessageSegment) []IMessageElement {
+	var elements []IMessageElement
 
 	for _, seg := range segments {
 		switch seg.Type {
 		case "text":
 			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
+				elements = append(elements, &TextSegment{Content: text})
 			}
 		case "at":
 			var target int64
@@ -353,7 +353,7 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				}
 			}
 			if target != 0 || seg.Data["qq"] == "all" {
-				elements = append(elements, &message.AtElement{Target: target})
+				elements = append(elements, &AtSegment{Target: target})
 			}
 		case "face":
 			var faceId int64
@@ -363,15 +363,15 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				faceId, _ = strconv.ParseInt(id, 10, 64)
 			}
 			if faceId != 0 {
-				elements = append(elements, &message.FaceElement{Index: int32(faceId)})
+				elements = append(elements, &FaceSegment{Index: int32(faceId)})
 			}
 		case "image":
-			elements = append(elements, &message.GroupImageElement{
+			elements = append(elements, &ImageSegment{
 				Url:  interfaceString(seg.Data["url"]),
-				Name: interfaceString(seg.Data["file"]),
+				File: interfaceString(seg.Data["file"]),
 			})
 		case "record":
-			elements = append(elements, &message.VoiceElement{
+			elements = append(elements, &VoiceSegment{
 				Url:  interfaceString(seg.Data["url"]),
 				Name: interfaceString(seg.Data["file"]),
 			})
@@ -383,18 +383,18 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				replySeq, _ = strconv.ParseInt(id, 10, 64)
 			}
 			if replySeq != 0 {
-				elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
+				elements = append(elements, &ReplySegment{ReplySeq: int32(replySeq)})
 			}
 		case "json":
 			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
+				elements = append(elements, &MessageElementAdapter{Elem: &message.LightAppElement{Content: data}})
 			}
 		case "forward":
 			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
+				elements = append(elements, &MessageElementAdapter{Elem: &message.ForwardElement{ResId: id}})
 			}
 		case "file":
-			elements = append(elements, &message.GroupFileElement{
+			elements = append(elements, &FileSegment{
 				Name: interfaceString(seg.Data["name"]),
 				Id:   interfaceString(seg.Data["id"]),
 				Url:  interfaceString(seg.Data["url"]),

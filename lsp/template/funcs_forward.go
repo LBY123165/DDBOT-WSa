@@ -173,7 +173,7 @@ func extractMessageContent(msg interface{}) interface{} {
 	case *message.PrivateMessage:
 		return extractIMessageElements(m.Elements)
 	case *adapter.GetMsgResult:
-		return extractIMessageElements(m.Elements)
+		return extractAdapterMessageElements(m.Elements)
 	}
 	return nil
 }
@@ -210,6 +210,10 @@ func extractIMessageElements(elems []message.IMessageElement) []map[string]inter
 		}
 	}
 	return contentList
+}
+
+func extractAdapterMessageElements(elems []adapter.IMessageElement) []map[string]interface{} {
+	return extractIMessageElements(adapter.ToMessageElements(elems))
 }
 
 // extractElementsContent 将 []interface{} 转换为转发格式
