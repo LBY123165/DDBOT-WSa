@@ -4,7 +4,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/utils"
@@ -38,20 +37,16 @@ func (p *Parser) Parse(elems []adapter.IMessageElement) {
 			search = elems[:]
 		}
 		if len(search) > 0 && search[0].Type() == adapter.ElementTypeAt {
-			if a, ok := search[0].(*adapter.MessageElementAdapter); ok {
-				if atElem, ok := a.Elem.(*message.AtElement); ok {
-					p.AtTarget = atElem.Target
-				}
+			if atElem, ok := search[0].(*adapter.AtSegment); ok {
+				p.AtTarget = atElem.Target
 			}
 			search = search[1:]
 		}
 		var afterCmd = false
 		for _, e := range search {
 			if afterCmd && e.Type() == adapter.ElementTypeAt {
-				if a, ok := e.(*adapter.MessageElementAdapter); ok {
-					if atElem, ok := a.Elem.(*message.AtElement); ok {
-						p.AtArgs = append(p.AtArgs, atElem.Target)
-					}
+				if atElem, ok := e.(*adapter.AtSegment); ok {
+					p.AtArgs = append(p.AtArgs, atElem.Target)
 				}
 			}
 			if !afterCmd && e.Type() != adapter.ElementTypeAt {
@@ -64,15 +59,13 @@ func (p *Parser) Parse(elems []adapter.IMessageElement) {
 		if element.Type() != adapter.ElementTypeText {
 			continue
 		}
-		if a, ok := element.(*adapter.MessageElementAdapter); ok {
-			if te, ok := a.Elem.(*message.TextElement); ok {
-				text := strings.TrimSpace(strings.Replace(te.Content, " ", " ", -1))
-				if text == "" {
-					continue
-				}
-				buf.WriteString(text)
-				buf.WriteString(" ")
+		if textElem, ok := element.(*adapter.TextSegment); ok {
+			text := strings.TrimSpace(strings.Replace(textElem.Content, " ", " ", -1))
+			if text == "" {
+				continue
 			}
+			buf.WriteString(text)
+			buf.WriteString(" ")
 		}
 	}
 	splitStr := utils.ArgSplit(strings.TrimSpace(buf.String()))

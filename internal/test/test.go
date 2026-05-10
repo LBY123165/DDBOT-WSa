@@ -2,7 +2,7 @@ package test
 
 import (
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
 	"github.com/stretchr/testify/assert"
@@ -63,13 +63,13 @@ const (
 )
 
 var (
-	Sender1 = &message.Sender{
-		Uin:      UID1,
+	Sender1 = &adapter.SenderInfo{
+		UserID:   UID1,
 		Nickname: NAME1,
 	}
 
-	Sender2 = &message.Sender{
-		Uin:      UID2,
+	Sender2 = &adapter.SenderInfo{
+		UserID:   UID2,
 		Nickname: NAME2,
 	}
 )

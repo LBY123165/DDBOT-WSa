@@ -3,7 +3,6 @@ package parser
 import (
 	"testing"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	"github.com/cnxysoft/DDBOT-WSa/utils"
@@ -26,7 +25,7 @@ func TestParser_Parse(t *testing.T) {
 	p := NewParser()
 	assert.NotNil(t, p)
 
-	elems := adapter.AdaptElements([]message.IMessageElement{message.NewAt(0), message.NewText(" "), message.NewText("/a -b 1 -c 2")})
+	elems := []adapter.IMessageElement{&adapter.AtSegment{Target: 0}, &adapter.TextSegment{Content: " "}, &adapter.TextSegment{Content: "/a -b 1 -c 2"}}
 	p.Parse(elems)
 
 	assert.EqualValues(t, "/a", p.GetCmd())
@@ -35,7 +34,7 @@ func TestParser_Parse(t *testing.T) {
 	assert.True(t, p.AtCheck())
 
 	utils.GetBot().TESTSetUin(test.UID1)
-	elems2 := adapter.AdaptElements([]message.IMessageElement{message.NewAt(test.UID2), message.NewText(" "), message.NewText("/a -b 1 -c 2")})
+	elems2 := []adapter.IMessageElement{&adapter.AtSegment{Target: test.UID2}, &adapter.TextSegment{Content: " "}, &adapter.TextSegment{Content: "/a -b 1 -c 2"}}
 	p.Parse(elems2)
 
 	assert.False(t, p.AtCheck())
@@ -46,16 +45,16 @@ func TestParser_Parse2(t *testing.T) {
 	p := NewParser()
 	assert.NotNil(t, p)
 
-	rawElems := []message.IMessageElement{
-		message.NewText(" "),
-		message.NewText("/a -b 1 -c 2"),
-		&message.GroupImageElement{},
-		message.NewText("-d 3"),
-		message.NewAt(test.UID1),
-		message.NewAt(test.UID2),
-		message.NewText("-e 4"),
+	rawElems := []adapter.IMessageElement{
+		&adapter.TextSegment{Content: " "},
+		&adapter.TextSegment{Content: "/a -b 1 -c 2"},
+		&adapter.ImageSegment{},
+		&adapter.TextSegment{Content: "-d 3"},
+		&adapter.AtSegment{Target: test.UID1},
+		&adapter.AtSegment{Target: test.UID2},
+		&adapter.TextSegment{Content: "-e 4"},
 	}
-	p.Parse(adapter.AdaptElements(rawElems))
+	p.Parse(rawElems)
 
 	assert.EqualValues(t, "/a", p.GetCmd())
 	assert.EqualValues(t, []string{"-b", "1", "-c", "2", "-d", "3", "-e", "4"}, p.GetArgs())

@@ -33,7 +33,7 @@ func TestLsp_ConcernNotify(t *testing.T) {
 	target := mmsg.NewGroupTarget(test.G1)
 	ctx := NewCtx(t, msgChan, test.Sender1, target)
 
-	err := Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err := Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 
 	tc1 := newTestConcern(t, testEventChan, testNotifyChan, test.Site1, []concern_type.Type{test.T1})

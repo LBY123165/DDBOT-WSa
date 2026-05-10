@@ -1171,10 +1171,10 @@ func (lgc *LspGroupCommand) NewMessageContext(log *logrus.Entry) *MessageContext
 		}
 		return nil
 	}
-	ctx.Sender = &message.Sender{
-		Uin:      lgc.msg.Sender.UserID,
+	ctx.Sender = &adapter.SenderInfo{
+		UserID:   lgc.msg.Sender.UserID,
 		Nickname: lgc.msg.Sender.Nickname,
-		CardName: lgc.msg.Sender.Card,
+		Card:     lgc.msg.Sender.Card,
 	}
 	return ctx
 }

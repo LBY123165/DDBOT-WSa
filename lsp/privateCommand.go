@@ -1495,7 +1495,7 @@ func (c *LspPrivateCommand) sendChain(msg *mmsg.MSG) []*message.PrivateMessage {
 func (c *LspPrivateCommand) commonTemplateData() map[string]interface{} {
 	return map[string]interface{}{
 		"msg":         c.msg,
-		"member_code": c.sender().Uin,
+		"member_code": c.sender().UserID,
 		"member_name": c.sender().DisplayName(),
 		"command":     CommandMaps,
 	}
@@ -1516,14 +1516,14 @@ func (c *LspPrivateCommand) templateMsg(name string, data map[string]interface{}
 	return m
 }
 
-func (c *LspPrivateCommand) sender() *message.Sender {
-	return &message.Sender{
-		Uin:      c.msg.Sender.UserID,
+func (c *LspPrivateCommand) sender() *adapter.SenderInfo {
+	return &adapter.SenderInfo{
+		UserID:   c.msg.Sender.UserID,
 		Nickname: c.msg.Sender.Nickname,
 	}
 }
 func (c *LspPrivateCommand) uin() int64 {
-	return c.sender().Uin
+	return c.sender().UserID
 }
 
 func (c *LspPrivateCommand) name() string {

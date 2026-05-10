@@ -3,7 +3,6 @@ package lsp
 import (
 	"context"
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	tc "github.com/cnxysoft/DDBOT-WSa/internal/test_concern"
@@ -42,7 +41,7 @@ func closeLsp(t *testing.T) {
 	test.CloseMirai()
 }
 
-func NewCtx(t *testing.T, receiver chan<- *mmsg.MSG, sender *message.Sender, target mmsg.Target) *MessageContext {
+func NewCtx(t *testing.T, receiver chan<- *mmsg.MSG, sender *adapter.SenderInfo, target mmsg.Target) *MessageContext {
 	ctx := NewMessageContext()
 	ctx.Lsp = Instance
 	ctx.Log = logger.WithField("test", "test")
@@ -192,7 +191,7 @@ func TestIEnable(t *testing.T) {
 	result := <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin))
 
 	IEnable(ctx, test.G1, "", false)
 	result = <-msgChan
@@ -243,7 +242,7 @@ func TestIGrantRole(t *testing.T) {
 	result := <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.Uin, permission.GroupAdmin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.UserID, permission.GroupAdmin))
 
 	IGrantRole(ctx, test.G1, permission.RoleType(-1), test.UID2, false)
 	result = <-msgChan
@@ -275,7 +274,7 @@ func TestIGrantRole(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin))
 
 	IGrantRole(ctx, 0, permission.Admin, test.UID2, false)
 	result = <-msgChan
@@ -302,45 +301,45 @@ func TestIGrantCmd(t *testing.T) {
 	target := mmsg.NewGroupTarget(test.G1)
 	ctx := NewCtx(t, msgChan, test.Sender1, target)
 
-	IGrantCmd(ctx, test.G1, "", test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, "", test.Sender2.UserID, false)
 	result := <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.Uin, permission.GroupAdmin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.UserID, permission.GroupAdmin))
 
-	IGrantCmd(ctx, test.G1, "", test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, "", test.Sender2.UserID, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), failed)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), "未找到用户")
 
-	localutils.GetBot().TESTAddMember(test.G1, test.Sender2.Uin, adapter.Member)
+	localutils.GetBot().TESTAddMember(test.G1, test.Sender2.UserID, adapter.Member)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), failed)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, true)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, true)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, true)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, true)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), failed)
 
 	assert.Nil(t, Instance.PermissionStateManager.GlobalDisableGroupCommand(WatchCommand))
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, true)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, true)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), globalDisabled)
 
-	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.Uin, false)
+	IGrantCmd(ctx, test.G1, WatchCommand, test.Sender2.UserID, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), globalDisabled)
 }
@@ -357,7 +356,7 @@ func TestISilenceCmd(t *testing.T) {
 	result := <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.Uin, permission.GroupAdmin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantGroupRole(test.G1, test.Sender1.UserID, permission.GroupAdmin))
 
 	ISilenceCmd(ctx, 0, false)
 	result = <-msgChan
@@ -380,7 +379,7 @@ func TestISilenceCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
 
-	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin))
+	assert.Nil(t, Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin))
 
 	ISilenceCmd(ctx, 0, false)
 	result = <-msgChan
@@ -423,7 +422,7 @@ func TestIWatch(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, WatchCommand))
 
@@ -518,7 +517,7 @@ func TestIConfigAtCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, ConfigCommand))
 
@@ -611,7 +610,7 @@ func TestIConfigAtAllCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, ConfigCommand))
 
@@ -672,7 +671,7 @@ func TestIConfigTitleNotifyCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, ConfigCommand))
 
@@ -733,7 +732,7 @@ func TestIConfigOfflineNotifyCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, ConfigCommand))
 
@@ -794,7 +793,7 @@ func TestIConfigFilterCmd(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 	assert.Nil(t, Instance.PermissionStateManager.DisableGroupCommand(test.G1, ConfigCommand))
 
@@ -1058,7 +1057,7 @@ func TestICleanConcern(t *testing.T) {
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), noPermission)
 
-	err = Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err = Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 
 	IAbnormalConcernCheck(ctx)

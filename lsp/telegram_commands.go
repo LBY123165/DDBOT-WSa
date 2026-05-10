@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
@@ -438,7 +438,7 @@ func (l *Lsp) newTGContext(chatID, fromID, senderUin, groupCode int64) *MessageC
 		Lsp:    l,
 		Log:    logger.WithField("tg_chat", chatID).WithField("tg_from", fromID).WithField("group", groupCode),
 		Target: mmsg.NewGroupTarget(groupCode),
-		Sender: &message.Sender{Uin: senderUin, Nickname: "tg:" + strconv.FormatInt(fromID, 10)},
+		Sender: &adapter.SenderInfo{UserID: senderUin, Nickname: "tg:" + strconv.FormatInt(fromID, 10)},
 	}
 	c.ReplyFunc = func(m *mmsg.MSG) interface{} {
 		lsptelegram.SendToChat(chatID, m)
