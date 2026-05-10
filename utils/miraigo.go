@@ -21,7 +21,7 @@ func AdapterMessageFilter(msg []adapter.IMessageElement, filter func(adapter.IMe
 	})
 }
 
-func UploadGroupImageByUrl(groupCode int64, url string, isNorm bool) (*message.ImageElement, error) {
+func UploadGroupImageByUrl(groupCode int64, url string, isNorm bool) (*adapter.ImageSegment, error) {
 	img, err := ImageGet(url)
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func UploadGroupImageByUrl(groupCode int64, url string, isNorm bool) (*message.I
 	return UploadGroupImage(groupCode, img, isNorm)
 }
 
-func UploadGroupImage(groupCode int64, img []byte, isNorm bool) (image *message.ImageElement, err error) {
+func UploadGroupImage(groupCode int64, img []byte, isNorm bool) (image *adapter.ImageSegment, err error) {
 	if isNorm {
 		img, err = ImageNormSize(img)
 		if err != nil {
@@ -39,14 +39,13 @@ func UploadGroupImage(groupCode int64, img []byte, isNorm bool) (image *message.
 	if !GetBot().IsOnline() {
 		return nil, errors.New("bot offline")
 	}
-	// 适配器模式：使用 base64 编码发送图片
 	base64Data := base64.StdEncoding.EncodeToString(img)
-	return &message.ImageElement{
+	return &adapter.ImageSegment{
 		File: "base64://" + base64Data,
 	}, nil
 }
 
-func UploadPrivateImage(uin int64, img []byte, isNorm bool) (*message.ImageElement, error) {
+func UploadPrivateImage(uin int64, img []byte, isNorm bool) (*adapter.ImageSegment, error) {
 	var err error
 	if isNorm {
 		img, err = ImageNormSize(img)
@@ -58,7 +57,7 @@ func UploadPrivateImage(uin int64, img []byte, isNorm bool) (*message.ImageEleme
 		return nil, errors.New("bot offline")
 	}
 	base64Data := base64.StdEncoding.EncodeToString(img)
-	return &message.ImageElement{
+	return &adapter.ImageSegment{
 		File: "base64://" + base64Data,
 	}, nil
 }

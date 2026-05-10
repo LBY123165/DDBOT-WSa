@@ -103,6 +103,8 @@ func reply(msg interface{}) *message.ReplyElement {
 		return message.NewReply(e)
 	case *adapter.GroupMessage:
 		return &message.ReplyElement{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID)), GroupID: e.GroupCode, Time: int32(e.Time)}
+	case *adapter.PrivateMessage:
+		return &message.ReplyElement{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID)), Time: int32(e.Time)}
 	case *message.PrivateMessage:
 		return message.NewPrivateReply(e)
 	default:
@@ -1090,6 +1092,22 @@ func reCall(msg interface{}) bool {
 				break
 			}
 		}
+	case *adapter.GroupMessage:
+		msgId = int32(e.ID)
+		for _, elem := range e.Elements {
+			if re, ok := adapterReplyElement(elem); ok {
+				msgId = re
+				break
+			}
+		}
+	case *adapter.PrivateMessage:
+		msgId = int32(e.ID)
+		for _, elem := range e.Elements {
+			if re, ok := adapterReplyElement(elem); ok {
+				msgId = re
+				break
+			}
+		}
 	default:
 		panic(fmt.Sprintf("需要撤回的消息类型无法解析: %v", msg))
 	}
@@ -1099,6 +1117,18 @@ func reCall(msg interface{}) bool {
 		return false
 	}
 	return true
+}
+
+func adapterReplyElement(elem adapter.IMessageElement) (int32, bool) {
+	switch e := elem.(type) {
+	case *adapter.ReplySegment:
+		return e.ReplySeq, true
+	case *adapter.MessageElementAdapter:
+		if re, ok := e.Unwrap().(*message.ReplyElement); ok {
+			return re.ReplySeq, true
+		}
+	}
+	return 0, false
 }
 
 func exec(input interface{}, inargs ...interface{}) string {

@@ -126,11 +126,11 @@ func logGroupMessage(msg *adapter.GroupMessage) {
 	if name == "" {
 		name = msg.Sender.Nickname
 	}
-	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.UserID, msgstringer.MsgToString(adapter.ToMessageElements(msg.Elements)), msg.ID)
+	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.UserID, msgstringer.AdapterMsgToString(msg.Elements), msg.ID)
 }
 
 func logPrivateMessage(msg *adapter.PrivateMessage) {
-	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.UserID, msgstringer.MsgToString(adapter.ToMessageElements(msg.Elements)), msg.ID)
+	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.UserID, msgstringer.AdapterMsgToString(msg.Elements), msg.ID)
 }
 
 func logFriendMessageRecallEvent(event *adapter.FriendMessageRecalledEvent) {

@@ -1,10 +1,12 @@
 package utils
 
 import (
+	"testing"
+
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestSerializationGroupMsg(t *testing.T) {
@@ -49,6 +51,28 @@ func TestMessageFilter(t *testing.T) {
 
 	c = MessageFilter(e, func(element message.IMessageElement) bool {
 		return element.Type() == message.At
+	})
+	assert.Len(t, c, 1)
+}
+
+func TestAdapterMessageFilter(t *testing.T) {
+	var e = []adapter.IMessageElement{
+		&adapter.TextSegment{Content: "asd"},
+		&adapter.ImageSegment{},
+		&adapter.AtSegment{},
+	}
+	c := AdapterMessageFilter(e, func(element adapter.IMessageElement) bool {
+		return element.Type() == adapter.ElementTypeText
+	})
+	assert.Len(t, c, 1)
+
+	c = AdapterMessageFilter(e, func(element adapter.IMessageElement) bool {
+		return element.Type() == adapter.ElementTypeText || element.Type() == adapter.ElementTypeImage
+	})
+	assert.Len(t, c, 2)
+
+	c = AdapterMessageFilter(e, func(element adapter.IMessageElement) bool {
+		return element.Type() == adapter.ElementTypeAt
 	})
 	assert.Len(t, c, 1)
 }

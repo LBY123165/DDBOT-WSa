@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 )
 
 func TestMsgToString(t *testing.T) {
@@ -28,4 +29,16 @@ func TestMsgToString(t *testing.T) {
 		nil,
 	}
 	MsgToString(m)
+}
+
+func TestAdapterMsgToString(t *testing.T) {
+	m := []adapter.IMessageElement{
+		&adapter.TextSegment{Content: "q"},
+		&adapter.ImageSegment{},
+		&adapter.AtSegment{Target: 0},
+		&adapter.ReplySegment{ReplySeq: 199},
+		&adapter.MessageElementAdapter{Elem: message.NewText("legacy")},
+		nil,
+	}
+	AdapterMsgToString(m)
 }
