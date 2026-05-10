@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/Sora233/sliceutil"
 	"github.com/alecthomas/kong"
@@ -1455,41 +1454,41 @@ func (c *LspPrivateCommand) DefaultLoggerWithCommand(command string) *logrus.Ent
 	return c.DefaultLogger().WithField("Command", command)
 }
 
-func (c *LspPrivateCommand) noPermission() *message.PrivateMessage {
+func (c *LspPrivateCommand) noPermission() *adapter.PrivateMessage {
 	return c.textReply("权限不够")
 }
 
-func (c *LspPrivateCommand) globalDisabledReply() *message.PrivateMessage {
+func (c *LspPrivateCommand) globalDisabledReply() *adapter.PrivateMessage {
 	return c.textReply("无法操作该命令，该命令已被管理员禁用")
 }
 
-func (c *LspPrivateCommand) disabledReply() *message.PrivateMessage {
+func (c *LspPrivateCommand) disabledReply() *adapter.PrivateMessage {
 	return c.textSend("该命令已被设置为disable，请设置enable后重试")
 }
 
-func (c *LspPrivateCommand) notImplReply() *message.PrivateMessage {
+func (c *LspPrivateCommand) notImplReply() *adapter.PrivateMessage {
 	return c.textReply("暂未实现，你可以催作者GKD")
 }
 
-func (c *LspPrivateCommand) textSend(text string) *message.PrivateMessage {
+func (c *LspPrivateCommand) textSend(text string) *adapter.PrivateMessage {
 	return c.send(mmsg.NewText(text))
 }
 
-func (c *LspPrivateCommand) textReply(text string) *message.PrivateMessage {
+func (c *LspPrivateCommand) textReply(text string) *adapter.PrivateMessage {
 	// 私聊reply效果不好
 	return c.send(mmsg.NewText(text))
 }
 
-func (c *LspPrivateCommand) textReplyF(format string, args ...interface{}) *message.PrivateMessage {
+func (c *LspPrivateCommand) textReplyF(format string, args ...interface{}) *adapter.PrivateMessage {
 	return c.send(mmsg.NewTextf(format, args...))
 }
 
-func (c *LspPrivateCommand) send(msg *mmsg.MSG) *message.PrivateMessage {
-	return c.l.PM(c.l.SendMsg(msg, mmsg.NewPrivateTarget(c.uin())))[0]
+func (c *LspPrivateCommand) send(msg *mmsg.MSG) *adapter.PrivateMessage {
+	return c.l.APM(c.l.SendMsg(msg, mmsg.NewPrivateTarget(c.uin())))[0]
 }
 
-func (c *LspPrivateCommand) sendChain(msg *mmsg.MSG) []*message.PrivateMessage {
-	return c.l.PM(c.l.SendMsg(msg, mmsg.NewPrivateTarget(c.uin())))
+func (c *LspPrivateCommand) sendChain(msg *mmsg.MSG) []*adapter.PrivateMessage {
+	return c.l.APM(c.l.SendMsg(msg, mmsg.NewPrivateTarget(c.uin())))
 }
 
 func (c *LspPrivateCommand) commonTemplateData() map[string]interface{} {

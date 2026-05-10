@@ -601,7 +601,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), adapter.ToMessageElements(msg.Elements)); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), msg.Elements); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 		if !l.started.Load() {
@@ -624,7 +624,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), adapter.ToMessageElements(msg.Elements)); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), msg.Elements); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 	})
@@ -1164,6 +1164,27 @@ func (l *Lsp) AGM(res []interface{}) []*adapter.GroupMessage {
 				UserID:   msg.Sender.Uin,
 				Nickname: msg.Sender.Nickname,
 				Card:     msg.Sender.CardName,
+			}
+		}
+		result = append(result, adapterMsg)
+	}
+	return result
+}
+
+func (l *Lsp) APM(res []interface{}) []*adapter.PrivateMessage {
+	var result []*adapter.PrivateMessage
+	for _, r := range res {
+		msg := r.(*message.PrivateMessage)
+		adapterMsg := &adapter.PrivateMessage{
+			ID:       int64(msg.Id),
+			UserID:   msg.Target,
+			Time:     int64(msg.Time),
+			Elements: adapter.AdaptElements(msg.Elements),
+		}
+		if msg.Sender != nil {
+			adapterMsg.Sender = &adapter.SenderInfo{
+				UserID:   msg.Sender.Uin,
+				Nickname: msg.Sender.Nickname,
 			}
 		}
 		result = append(result, adapterMsg)

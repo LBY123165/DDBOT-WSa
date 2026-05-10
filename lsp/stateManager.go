@@ -8,7 +8,6 @@ import (
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
-	"github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/tidwall/buntdb"
 )
 
@@ -39,27 +38,36 @@ type StateManager struct {
 	KeySet
 }
 
-func (s *StateManager) SaveMessageImageUrl(groupCode int64, messageID int32, msgs []message.IMessageElement) error {
-	imgs := utils.MessageFilter(msgs, func(e message.IMessageElement) bool {
-		return e.Type() == message.Image
-	})
+func (s *StateManager) SaveMessageImageUrl(groupCode int64, messageID int32, msgs []adapter.IMessageElement) error {
 	var urls []string
-	for _, img := range imgs {
-		switch i := img.(type) {
-		case *message.GroupImageElement:
-			if i.Url != "" {
-				urls = append(urls, i.Url)
-			}
-		case *message.FriendImageElement:
-			if i.Url != "" {
-				urls = append(urls, i.Url)
-			}
+	for _, msg := range msgs {
+		url := messageImageURL(msg)
+		if url != "" {
+			urls = append(urls, url)
 		}
 	}
 	if len(urls) == 0 {
 		return nil
 	}
 	return s.Set(s.GroupMessageImageKey(groupCode, messageID), strings.Join(urls, " "), localdb.SetExpireOpt(time.Hour*8))
+}
+
+func messageImageURL(msg adapter.IMessageElement) string {
+	switch e := msg.(type) {
+	case *adapter.ImageSegment:
+		if e.Url != "" {
+			return e.Url
+		}
+		return e.File
+	case *adapter.MessageElementAdapter:
+		switch elem := e.Unwrap().(type) {
+		case *message.GroupImageElement:
+			return elem.Url
+		case *message.FriendImageElement:
+			return elem.Url
+		}
+	}
+	return ""
 }
 
 func (s *StateManager) GetMessageImageUrl(groupCode int64, messageID int32) []string {

@@ -1,14 +1,15 @@
 package lsp
 
 import (
+	"sort"
+	"testing"
+
 	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/buntdb"
-	"sort"
-	"testing"
 )
 
 func newStateManager(t *testing.T) *StateManager {
@@ -71,22 +72,22 @@ func TestStateManager_GetMessageImageUrl(t *testing.T) {
 	sm := newStateManager(t)
 	assert.NotNil(t, sm)
 
-	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID1, []message.IMessageElement{}))
+	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID1, []adapter.IMessageElement{}))
 	assert.Len(t, sm.GetMessageImageUrl(test.G1, test.MessageID1), 0)
 
-	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID1, []message.IMessageElement{
-		&message.GroupImageElement{
-			Url: "image1",
-		},
-		&message.GroupImageElement{
-			Url: "image2",
-		},
-		&message.FriendImageElement{
-			Url: "image3",
-		},
+	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID1, []adapter.IMessageElement{
+		&adapter.ImageSegment{Url: "image1"},
+		&adapter.ImageSegment{Url: "image2"},
+		&adapter.ImageSegment{Url: "image3"},
 	}))
 
 	assert.Len(t, sm.GetMessageImageUrl(test.G1, test.MessageID1), 3)
+
+	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID2, []adapter.IMessageElement{
+		&adapter.MessageElementAdapter{Elem: &message.GroupImageElement{Url: "legacy-group-image"}},
+		&adapter.MessageElementAdapter{Elem: &message.FriendImageElement{Url: "legacy-friend-image"}},
+	}))
+	assert.ElementsMatch(t, []string{"legacy-group-image", "legacy-friend-image"}, sm.GetMessageImageUrl(test.G1, test.MessageID2))
 }
 
 func TestStateManager_GetCurrentMode(t *testing.T) {

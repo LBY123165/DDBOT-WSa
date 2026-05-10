@@ -129,17 +129,7 @@ func (l *Lsp) ConcernNotify() {
 					for _, msg := range msgs {
 						if msg.ID == -1 {
 							// 检查有没有@全体成员
-							e := utils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
-								if at, ok := element.(*adapter.AtSegment); ok {
-									return at.Target == 0
-								}
-								legacy, ok := element.(*adapter.MessageElementAdapter)
-								if !ok {
-									return false
-								}
-								at, ok := legacy.Elem.(*message.AtElement)
-								return ok && at.Target == 0
-							})
+							e := utils.AdapterMessageFilter(msg.Elements, isAtAllElement)
 							if len(e) == 0 {
 								continue
 							}
@@ -147,23 +137,15 @@ func (l *Lsp) ConcernNotify() {
 							// 有@全体成员的消息应该去掉之后重试
 							secondM := mmsg.NewMSGFromGroupMessage(&adapter.GroupMessage{Elements: msg.Elements})
 							secondM.Drop(func(e adapter.IMessageElement, _ int) bool {
-								if at, ok := e.(*adapter.AtSegment); ok {
-									return at.Target == 0
-								}
-								legacy, ok := e.(*adapter.MessageElementAdapter)
-								if !ok {
-									return false
-								}
-								at, ok := legacy.Elem.(*message.AtElement)
-								return ok && at.Target == 0
+								return isAtAllElement(e)
 							})
 
-							secondRes := l.GM(l.SendMsg(secondM, target))
+							secondRes := l.AGM(l.SendMsg(secondM, target))
 							// secondRes一定是一条
 							if len(secondRes) != 1 {
 								panic(fmt.Sprintf("INTERNAL: len(secondRes) is %v", len(secondRes)))
 							}
-							if secondRes[0].Id == -1 {
+							if secondRes[0].ID == -1 {
 								// 去掉@全员还是发送失败
 								continue
 							}
@@ -191,6 +173,17 @@ func (l *Lsp) ConcernNotify() {
 
 func (l *Lsp) NotifyMessage(inotify concern.Notify) *mmsg.MSG {
 	return inotify.ToMessage()
+}
+
+func isAtAllElement(element adapter.IMessageElement) bool {
+	switch e := element.(type) {
+	case *adapter.AtSegment:
+		return e.Target == 0
+	case *adapter.MessageElementAdapter:
+		at, ok := e.Unwrap().(*message.AtElement)
+		return ok && at.Target == 0
+	}
+	return false
 }
 
 func newAtAllMsg(m *mmsg.MSG) *mmsg.MSG {

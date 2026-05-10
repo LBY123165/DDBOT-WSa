@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/template"
 	"go.uber.org/atomic"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/Sora233/sliceutil"
 	"github.com/alecthomas/kong"
@@ -291,7 +291,7 @@ func (lgc *LspGroupCommand) SetuCommand(r18 bool) {
 	var (
 		imgsBytes   = make([][]byte, len(imgs))
 		errs        = make([]error, len(imgs))
-		groupImages = make([]*message.ImageElement, len(imgs))
+		groupImages = make([]*adapter.ImageSegment, len(imgs))
 		wg          = new(sync.WaitGroup)
 	)
 
@@ -315,7 +315,7 @@ func (lgc *LspGroupCommand) SetuCommand(r18 bool) {
 				errs[index] = fmt.Errorf("get image bytes failed %v", err)
 				return
 			}
-			groupImages[index], errs[index] = utils.UploadGroupImage(lgc.groupCode(), imgBytes, true)
+			groupImages[index] = (&mmsg.ImageBytesElement{Buf: imgBytes}).Norm().PackToElement(mmsg.NewGroupTarget(lgc.groupCode())).(*adapter.ImageSegment)
 		}(index)
 	}
 	wg.Wait()
@@ -348,7 +348,7 @@ func (lgc *LspGroupCommand) SetuCommand(r18 bool) {
 				}
 				imgSubCount += 1
 				img := imgs[i+index]
-				msg.Append(&adapter.MessageElementAdapter{Elem: groupImage})
+				msg.Append(groupImage)
 				if loliconImage, ok := img.(*lolicon_pool.Setu); ok {
 					log.WithFields(logrus.Fields{
 						"Author":    loliconImage.Author,
@@ -372,7 +372,7 @@ func (lgc *LspGroupCommand) SetuCommand(r18 bool) {
 			if len(msg.Elements()) == 0 {
 				return
 			}
-			if lgc.reply(msg).Id == -1 {
+			if lgc.reply(msg).ID == -1 {
 				missCount.Add(imgSubCount)
 			}
 		}(i)
@@ -856,33 +856,39 @@ func (lgc *LspGroupCommand) ReverseCommand() {
 	}
 
 	for _, e := range lgc.msg.Elements {
-		if e.Type() == adapter.ElementTypeImage {
-			if a, ok := e.(*adapter.MessageElementAdapter); ok {
-				if ie, ok := a.Elem.(*message.GroupImageElement); ok {
-					lgc.reserveGif(ie.Url)
-					return
-				}
-			}
-			log.Errorf("cast to ImageElement failed")
-			lgc.textReply("失败")
-			return
-		} else if e.Type() == adapter.ElementTypeReply {
-			if a, ok := e.(*adapter.MessageElementAdapter); ok {
-				if re, ok := a.Elem.(*message.ReplyElement); ok {
-					urls := lgc.l.LspStateManager.GetMessageImageUrl(lgc.groupCode(), re.ReplySeq)
-					if len(urls) >= 1 {
-						lgc.reserveGif(urls[0])
-						return
-					}
-				}
-			}
-			log.Errorf("cast to ReplyElement failed")
-			lgc.textReply("失败")
+		imageURL := messageImageURL(e)
+		if imageURL != "" {
+			lgc.reserveGif(imageURL)
 			return
 		}
+
+		replySeq, ok := messageReplySeq(e)
+		if !ok {
+			continue
+		}
+		urls := lgc.l.LspStateManager.GetMessageImageUrl(lgc.groupCode(), replySeq)
+		if len(urls) >= 1 {
+			lgc.reserveGif(urls[0])
+			return
+		}
+		log.Errorf("reply image url not found")
+		lgc.textReply("失败")
+		return
 	}
 	log.Debug("no image found")
 	lgc.textReply("参数错误 - 未找到图片")
+}
+
+func messageReplySeq(msg adapter.IMessageElement) (int32, bool) {
+	switch e := msg.(type) {
+	case *adapter.ReplySegment:
+		return e.ReplySeq, true
+	case *adapter.MessageElementAdapter:
+		if reply, ok := e.Unwrap().(*message.ReplyElement); ok {
+			return reply.ReplySeq, true
+		}
+	}
+	return 0, false
 }
 
 func (lgc *LspGroupCommand) HelpCommand() {
@@ -1045,23 +1051,23 @@ func (lgc *LspGroupCommand) groupDisabled(command string) bool {
 	return lgc.l.PermissionStateManager.CheckGroupCommandDisabled(lgc.groupCode(), command)
 }
 
-func (lgc *LspGroupCommand) textReply(text string) *message.GroupMessage {
+func (lgc *LspGroupCommand) textReply(text string) *adapter.GroupMessage {
 	return lgc.reply(mmsg.NewText(text))
 }
 
-func (lgc *LspGroupCommand) textReplyF(format string, args ...interface{}) *message.GroupMessage {
+func (lgc *LspGroupCommand) textReplyF(format string, args ...interface{}) *adapter.GroupMessage {
 	return lgc.reply(mmsg.NewTextf(format, args...))
 }
 
-func (lgc *LspGroupCommand) textSend(text string) *message.GroupMessage {
+func (lgc *LspGroupCommand) textSend(text string) *adapter.GroupMessage {
 	return lgc.send(mmsg.NewText(text))
 }
 
-func (lgc *LspGroupCommand) textSendF(format string, args ...interface{}) *message.GroupMessage {
+func (lgc *LspGroupCommand) textSendF(format string, args ...interface{}) *adapter.GroupMessage {
 	return lgc.send(mmsg.NewTextf(format, args...))
 }
 
-func (lgc *LspGroupCommand) reply(msg *mmsg.MSG) *message.GroupMessage {
+func (lgc *LspGroupCommand) reply(msg *mmsg.MSG) *adapter.GroupMessage {
 	m := mmsg.NewMSG()
 	// Use adapter types to build the reply reference
 	replyElem := &adapter.ReplySegment{
@@ -1074,23 +1080,23 @@ func (lgc *LspGroupCommand) reply(msg *mmsg.MSG) *message.GroupMessage {
 	return lgc.send(m)
 }
 
-func (lgc *LspGroupCommand) send(msg *mmsg.MSG) *message.GroupMessage {
-	return lgc.l.GM(lgc.l.SendMsg(msg, mmsg.NewGroupTarget(lgc.groupCode())))[0]
+func (lgc *LspGroupCommand) send(msg *mmsg.MSG) *adapter.GroupMessage {
+	return lgc.l.AGM(lgc.l.SendMsg(msg, mmsg.NewGroupTarget(lgc.groupCode())))[0]
 }
 
-func (lgc *LspGroupCommand) sendChain(msg *mmsg.MSG) []*message.GroupMessage {
-	return lgc.l.GM(lgc.l.SendMsg(msg, mmsg.NewGroupTarget(lgc.groupCode())))
+func (lgc *LspGroupCommand) sendChain(msg *mmsg.MSG) []*adapter.GroupMessage {
+	return lgc.l.AGM(lgc.l.SendMsg(msg, mmsg.NewGroupTarget(lgc.groupCode())))
 }
 
 func (lgc *LspGroupCommand) sender() *adapter.SenderInfo {
 	return lgc.msg.Sender
 }
 
-func (lgc *LspGroupCommand) noPermissionReply() *message.GroupMessage {
+func (lgc *LspGroupCommand) noPermissionReply() *adapter.GroupMessage {
 	return lgc.textReply("权限不够")
 }
 
-func (lgc *LspGroupCommand) globalDisabledReply() *message.GroupMessage {
+func (lgc *LspGroupCommand) globalDisabledReply() *adapter.GroupMessage {
 	return lgc.textReply("无法操作该命令，该命令已被管理员禁用")
 }
 
