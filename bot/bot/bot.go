@@ -400,13 +400,6 @@ func Login() {
 	logger.Info("Adapter mode: no login required")
 }
 
-func UseDevice(device []byte) error {
-	return nil
-}
-
-func GenRandomDevice() {
-}
-
 func RefreshList() {
 	refreshList()
 }
@@ -505,14 +498,6 @@ func (bot *Bot) RequestSMS() bool {
 
 func (bot *Bot) SubmitSMS(string) (interface{}, error) {
 	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) UseDevice(info interface{}) error {
-	return nil
-}
-
-func (bot *Bot) Device() interface{} {
-	return nil
 }
 
 func (bot *Bot) DispatchGroupMessage(msg *adapter.GroupMessage) {
