@@ -1,22 +1,21 @@
 package telegram
 
 import (
-    "context"
-    "encoding/base64"
-    "net"
-    "net/http"
-    "net/url"
-    "os"
-    "strings"
-    "sync"
-    "time"
-
-    "github.com/Mrs4s/MiraiGo/message"
-    "github.com/Sora233/MiraiGo-Template/config"
-    "github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
-    "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-    "github.com/sirupsen/logrus"
-    xproxy "golang.org/x/net/proxy"
+	"context"
+	"encoding/base64"
+	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/sirupsen/logrus"
+	xproxy "golang.org/x/net/proxy"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"strings"
+	"sync"
+	"time"
 )
 
 var (
@@ -25,7 +24,7 @@ var (
 	bot         *tgbotapi.BotAPI
 	enabled     bool
 	initErr     error
-	globalChats []int64           // independent telegram chat ids
+	globalChats []int64 // independent telegram chat ids
 )
 
 // recvOnce ensures we only start one receiving loop
@@ -98,23 +97,25 @@ func ensureInit() bool {
 
 // reinitTelegram re-creates the Telegram bot client using current config.
 func reinitTelegram() error {
-    if !config.GlobalConfig.GetBool("telegram.enable") {
-        return Err("telegram disabled")
-    }
-    token := config.GlobalConfig.GetString("telegram.token")
-    if token == "" {
-        return Err("telegram.token is empty")
-    }
-    httpClient := buildTelegramHTTPClient()
-    endpoint := config.GlobalConfig.GetString("telegram.endpoint")
-    if endpoint == "" { endpoint = tgbotapi.APIEndpoint }
-    b, err := tgbotapi.NewBotAPIWithClient(token, endpoint, httpClient)
-    if err != nil {
-        return err
-    }
-    bot = b
-    log.Infof("telegram bot re-authorized as %s", bot.Self.UserName)
-    return nil
+	if !config.GlobalConfig.GetBool("telegram.enable") {
+		return Err("telegram disabled")
+	}
+	token := config.GlobalConfig.GetString("telegram.token")
+	if token == "" {
+		return Err("telegram.token is empty")
+	}
+	httpClient := buildTelegramHTTPClient()
+	endpoint := config.GlobalConfig.GetString("telegram.endpoint")
+	if endpoint == "" {
+		endpoint = tgbotapi.APIEndpoint
+	}
+	b, err := tgbotapi.NewBotAPIWithClient(token, endpoint, httpClient)
+	if err != nil {
+		return err
+	}
+	bot = b
+	log.Infof("telegram bot re-authorized as %s", bot.Self.UserName)
+	return nil
 }
 
 // SendToChat sends the given MSG to a specific Telegram chat.
@@ -270,22 +271,24 @@ func parseInt64(s string) int64 {
 	return sign * n
 }
 
-func sendToTelegram(chatID int64, sm *message.SendingMessage) {
+func sendToTelegram(chatID int64, sm *adapter.SendingMessage) {
 	if sm == nil || bot == nil {
 		return
 	}
 	var tb strings.Builder
-	var images []*message.ImageElement
-	var videos []*message.VideoElement
+	var images []*adapter.ImageSegment
+	var videos []*adapter.VideoSegment
 	for _, e := range sm.Elements {
 		switch v := e.(type) {
-		case *message.TextElement:
+		case *adapter.TextSegment:
 			tb.WriteString(v.Content)
-		case *message.ImageElement:
+		case *adapter.ImageSegment:
 			images = append(images, v)
-		case *message.VideoElement:
-			videos = append(videos, v)
-		case *message.AtElement:
+		case *adapter.VideoSegment:
+			if v.Url != "" {
+				videos = append(videos, v)
+			}
+		case *adapter.AtSegment:
 			if v.Target == 0 {
 				tb.WriteString("@all ")
 			} else {
@@ -320,7 +323,7 @@ func sendToTelegram(chatID int64, sm *message.SendingMessage) {
 	}
 }
 
-func sendPhoto(chatID int64, img *message.ImageElement, caption string) {
+func sendPhoto(chatID int64, img *adapter.ImageSegment, caption string) {
 	if img == nil || bot == nil {
 		return
 	}
@@ -355,36 +358,31 @@ func sendPhoto(chatID int64, img *message.ImageElement, caption string) {
 		log.WithError(err).WithField("chat", chatID).Warn("send photo failed")
 	}
 }
-func sendVideo(chatID int64, v *message.VideoElement, caption string) {
+func sendVideo(chatID int64, v *adapter.VideoSegment, caption string) {
 	if v == nil || bot == nil {
 		return
 	}
 	var cfg tgbotapi.VideoConfig
-	switch f := v.File.(type) {
-	case string:
-		file := strings.TrimSpace(f)
-		if strings.HasPrefix(file, "http://") || strings.HasPrefix(file, "https://") {
-			cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileURL(file))
-		} else if strings.HasPrefix(file, "base64://") {
-			b, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(file, "base64://"))
-			if err != nil {
-				log.WithError(err).Warn("decode base64 video failed")
-				return
-			}
-			cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileBytes{Name: "video.mp4", Bytes: b})
-		} else if strings.HasPrefix(file, "file://") {
-			p := strings.TrimPrefix(file, "file://")
-			b, err := httpReadFile(p)
-			if err != nil {
-				log.WithError(err).Warn("read local video failed")
-				return
-			}
-			cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileBytes{Name: "video.mp4", Bytes: b})
-		} else if len(v.Url) > 0 {
-			cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileURL(v.Url))
-		} else {
+	file := strings.TrimSpace(v.Url)
+	if strings.HasPrefix(file, "http://") || strings.HasPrefix(file, "https://") {
+		cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileURL(file))
+	} else if strings.HasPrefix(file, "base64://") {
+		b, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(file, "base64://"))
+		if err != nil {
+			log.WithError(err).Warn("decode base64 video failed")
 			return
 		}
+		cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileBytes{Name: "video.mp4", Bytes: b})
+	} else if strings.HasPrefix(file, "file://") {
+		p := strings.TrimPrefix(file, "file://")
+		b, err := httpReadFile(p)
+		if err != nil {
+			log.WithError(err).Warn("read local video failed")
+			return
+		}
+		cfg = tgbotapi.NewVideo(chatID, tgbotapi.FileBytes{Name: "video.mp4", Bytes: b})
+	} else {
+		return
 	}
 	if len(caption) > 0 {
 		cfg.Caption = caption

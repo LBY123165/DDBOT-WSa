@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/sirupsen/logrus"
 )
@@ -974,8 +973,8 @@ func getMap(v interface{}) map[string]interface{} {
 	return nil
 }
 
-func getFile(v interface{}) client.GroupFile {
-	var file client.GroupFile
+func getFile(v interface{}) adapter.GroupFile {
+	var file adapter.GroupFile
 	data, err := json.Marshal(v)
 	if err != nil {
 		return file

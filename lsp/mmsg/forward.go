@@ -1,8 +1,6 @@
 package mmsg
 
-import (
-	"github.com/Mrs4s/MiraiGo/message"
-)
+import "github.com/cnxysoft/DDBOT-WSa/adapter"
 
 // ForwardOptions 合并转发消息的顶层参数
 // 对应 onebot-v11 send_group_forward_msg API 的顶层字段
@@ -17,19 +15,22 @@ type ForwardOptions struct {
 // 当 Append 到 MSG 时，会将节点列表复制到 MSG.ForwardNodes
 type ForwardElement struct {
 	Nodes   []map[string]interface{} // onebot-v11 格式的节点列表
-	Options *ForwardOptions           // 顶层参数 (prompt, source, summary, news)
+	Options *ForwardOptions          // 顶层参数 (prompt, source, summary, news)
 }
 
-// Type 实现 message.IMessageElement 接口
-func (f *ForwardElement) Type() message.ElementType {
-	return message.Forward
+// Type 实现 CustomElement 接口
+func (f *ForwardElement) Type() adapter.ElementType {
+	return adapter.ElementTypeForward
 }
 
-// PackToElement 实现 CustomElement 接口，返回 message.ForwardElement
-// 由于 onebot-v11 的转发消息不走 MiraiGo 的转发协议，这里返回 nil
+func (f *ForwardElement) ToSendingMessage() *adapter.SendingMessage {
+	return &adapter.SendingMessage{Elements: []adapter.IMessageElement{f}}
+}
+
+// PackToElement 实现 CustomElement 接口
 // 实际转发消息通过 SendGroupForwardMessage / SendPrivateForwardMessage API 发送
-func (f *ForwardElement) PackToElement(target Target) message.IMessageElement {
-	return nil // 不通过 MiraiGo 原生协议发送
+func (f *ForwardElement) PackToElement(target Target) adapter.IMessageElement {
+	return nil
 }
 
 // NewForwardElement 创建一个转发消息元素

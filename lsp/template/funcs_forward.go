@@ -1,13 +1,11 @@
 package template
 
 import (
-	"strconv"
-	"time"
-
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
+	"strconv"
+	"time"
 )
 
 // forward 构建合并转发消息
@@ -40,7 +38,7 @@ import (
 //
 // Parameters:
 //   - nodes []interface{}: 转发节点列表，每个节点包含（字段优先级从高到低）：
-//   - message: 原始消息（*message.GroupMessage/*message.PrivateMessage），会提取发送人信息和元素
+//   - message: 原始消息（*adapter.GroupMessage/*adapter.PrivateMessage），会提取发送人信息和元素
 //   - elements: 消息元素列表，会覆盖 message 的元素
 //   - content: 文本内容、*mmsg.ForwardElement（嵌套转发）或其他可转发内容
 //   - senderName: 发送者昵称（可选，未提供时使用 "BOT"）
@@ -90,16 +88,8 @@ func forward(nodes []interface{}, options ...map[string]interface{}) *mmsg.Forwa
 					content = "" // 确保 content 有值
 				}
 			}
-		} else if elements, ok := nodeMap["elements"].([]interface{}); ok && len(elements) > 0 {
-			// 有 elements，使用 elements
-			content = extractElementsContent(elements)
-			if contentList, ok := content.([]map[string]interface{}); !ok || len(contentList) == 0 {
-				if fallback, ok := nodeMap["content"].(string); ok && fallback != "" {
-					content = fallback
-				} else {
-					content = ""
-				}
-			}
+		} else if elements, ok := extractNodeElementsContent(nodeMap["elements"]); ok && len(elements) > 0 {
+			content = elements
 		} else {
 			// 只有 content
 			content = nodeMap["content"]
@@ -168,12 +158,12 @@ type senderInfo struct {
 // extractMessageContent 从原始消息中提取转发内容
 func extractMessageContent(msg interface{}) interface{} {
 	switch m := msg.(type) {
-	case *message.GroupMessage:
-		return extractIMessageElements(m.Elements)
-	case *message.PrivateMessage:
-		return extractIMessageElements(m.Elements)
+	case *adapter.GroupMessage:
+		return extractAdapterMessageElements(m.Elements)
+	case *adapter.PrivateMessage:
+		return extractAdapterMessageElements(m.Elements)
 	case *adapter.GetMsgResult:
-		return extractIMessageElements(m.Elements)
+		return extractAdapterMessageElements(m.Elements)
 	}
 	return nil
 }
@@ -181,27 +171,30 @@ func extractMessageContent(msg interface{}) interface{} {
 // extractMessageSender 从原始消息中提取发送人信息
 func extractMessageSender(msg interface{}) *senderInfo {
 	switch m := msg.(type) {
-	case *message.GroupMessage:
-		return &senderInfo{Uin: m.Sender.Uin, Nickname: m.Sender.Nickname, CardName: m.Sender.CardName}
-	case *message.PrivateMessage:
-		return &senderInfo{Uin: m.Sender.Uin, Nickname: m.Sender.Nickname, CardName: m.Sender.CardName}
+	case *adapter.GroupMessage:
+		return extractAdapterSender(m.Sender)
+	case *adapter.PrivateMessage:
+		return extractAdapterSender(m.Sender)
 	case *adapter.GetMsgResult:
-		if m.Sender != nil {
-			return &senderInfo{Uin: m.Sender.UserID, Nickname: m.Sender.Nickname, CardName: m.Sender.Card}
-		}
+		return extractAdapterSender(m.Sender)
 	}
 	return nil
 }
 
-// extractIMessageElements 将 []message.IMessageElement 转换为转发格式
-// 返回 []map[string]interface{}，每个元素包含 type 和 data 字段（onebot 标准格式）
-func extractIMessageElements(elems []message.IMessageElement) []map[string]interface{} {
+func extractAdapterSender(sender *adapter.SenderInfo) *senderInfo {
+	if sender == nil {
+		return nil
+	}
+	return &senderInfo{Uin: sender.UserID, Nickname: sender.Nickname, CardName: sender.Card}
+}
+
+func extractAdapterMessageElements(elems []adapter.IMessageElement) []map[string]interface{} {
 	var contentList []map[string]interface{}
 	for _, elem := range elems {
 		if elem == nil {
 			continue
 		}
-		seg := convertToMessageSegment(elem)
+		seg := convertAdapterToMessageSegment(elem)
 		if seg.Type != "" && seg.Data != nil {
 			contentList = append(contentList, map[string]interface{}{
 				"type": seg.Type,
@@ -212,28 +205,28 @@ func extractIMessageElements(elems []message.IMessageElement) []map[string]inter
 	return contentList
 }
 
-// extractElementsContent 将 []interface{} 转换为转发格式
-// 返回 []map[string]interface{}，每个元素包含 type 和 data 字段（onebot 标准格式）
-// 支持 string 类型自动转换为 text 消息段
-func extractElementsContent(elems []interface{}) interface{} {
+func extractNodeElementsContent(elements interface{}) ([]map[string]interface{}, bool) {
+	switch elems := elements.(type) {
+	case []adapter.IMessageElement:
+		return extractAdapterMessageElements(elems), true
+	case []interface{}:
+		return extractInterfaceElementsContent(elems), true
+	}
+	return nil, false
+}
+
+func extractInterfaceElementsContent(elems []interface{}) []map[string]interface{} {
 	var contentList []map[string]interface{}
 	for _, elem := range elems {
-		// 处理字符串类型，自动转换为 text 消息段
-		if s, ok := elem.(string); ok && s != "" {
-			contentList = append(contentList, map[string]interface{}{
-				"type": "text",
-				"data": map[string]interface{}{"text": s},
-			})
-			continue
-		}
-		// 处理 message.IMessageElement 类型
-		if imsg, ok := elem.(message.IMessageElement); ok {
-			seg := convertToMessageSegment(imsg)
-			if seg.Type != "" {
-				contentList = append(contentList, map[string]interface{}{
-					"type": seg.Type,
-					"data": seg.Data,
-				})
+		switch e := elem.(type) {
+		case string:
+			if e != "" {
+				contentList = append(contentList, map[string]interface{}{"type": "text", "data": map[string]interface{}{"text": e}})
+			}
+		case adapter.IMessageElement:
+			seg := convertAdapterToMessageSegment(e)
+			if seg.Type != "" && seg.Data != nil {
+				contentList = append(contentList, map[string]interface{}{"type": seg.Type, "data": seg.Data})
 			}
 		}
 	}
@@ -273,126 +266,30 @@ type forwardMsgSegment struct {
 	Data map[string]interface{}
 }
 
-// convertToMessageSegment 将 message.IMessageElement 转换为 MessageSegment 格式
-func convertToMessageSegment(elem message.IMessageElement) forwardMsgSegment {
+func convertAdapterToMessageSegment(elem adapter.IMessageElement) forwardMsgSegment {
 	switch e := elem.(type) {
-	// message 包类型
-	case *message.TextElement:
-		return forwardMsgSegment{
-			Type: "text",
-			Data: map[string]interface{}{"text": e.Content},
-		}
-	case *message.AtElement:
+	case *adapter.TextSegment:
+		return forwardMsgSegment{Type: "text", Data: map[string]interface{}{"text": e.Content}}
+	case *adapter.AtSegment:
 		qq := "all"
 		if e.Target != 0 {
 			qq = strconv.FormatInt(e.Target, 10)
 		}
-		return forwardMsgSegment{
-			Type: "at",
-			Data: map[string]interface{}{"qq": qq},
+		return forwardMsgSegment{Type: "at", Data: map[string]interface{}{"qq": qq}}
+	case *adapter.FaceSegment:
+		return forwardMsgSegment{Type: "face", Data: map[string]interface{}{"id": e.Index}}
+	case *adapter.ImageSegment:
+		file := e.Url
+		if file == "" {
+			file = e.File
 		}
-	case *message.FaceElement:
-		return forwardMsgSegment{
-			Type: "face",
-			Data: map[string]interface{}{"id": e.Index},
-		}
-	case *message.GroupImageElement:
-		return forwardMsgSegment{
-			Type: "image",
-			Data: map[string]interface{}{
-				"name": e.Name,
-				"file": e.Url,
-			},
-		}
-	case *message.FriendImageElement:
-		return forwardMsgSegment{
-			Type: "image",
-			Data: map[string]interface{}{
-				"file": e.Url,
-			},
-		}
-	case *message.VoiceElement:
-		return forwardMsgSegment{
-			Type: "record",
-			Data: map[string]interface{}{
-				"name": e.Name,
-				"file": e.Url,
-			},
-		}
-	case *message.ReplyElement:
-		return forwardMsgSegment{
-			Type: "reply",
-			Data: map[string]interface{}{"id": e.ReplySeq},
-		}
-	case *message.LightAppElement:
-		return forwardMsgSegment{
-			Type: "json",
-			Data: map[string]interface{}{"data": e.Content},
-		}
-	// mmsg 包类型
-	case *mmsg.ImageBytesElement:
-		file := e.GetFile()
-		if file != "" {
-			return forwardMsgSegment{
-				Type: "image",
-				Data: map[string]interface{}{
-					"file": file,
-				},
-			}
-		}
-		return forwardMsgSegment{}
-	case *mmsg.AtElement:
-		qq := "all"
-		if e.Target != 0 {
-			qq = strconv.FormatInt(e.Target, 10)
-		}
-		return forwardMsgSegment{
-			Type: "at",
-			Data: map[string]interface{}{"qq": qq},
-		}
-	case *mmsg.PokeElement:
-		return forwardMsgSegment{
-			Type: "poke",
-			Data: map[string]interface{}{"uin": e.Uin},
-		}
-	case *mmsg.CutElement:
-		return forwardMsgSegment{
-			Type: "cut",
-			Data: nil,
-		}
-	case *mmsg.RecordElement:
-		file := e.GetFile()
-		if file != "" {
-			return forwardMsgSegment{
-				Type: "record",
-				Data: map[string]interface{}{
-					"file": file,
-				},
-			}
-		}
-		return forwardMsgSegment{}
-	case *mmsg.VideoElement:
-		file := e.GetFile()
-		if file != "" {
-			return forwardMsgSegment{
-				Type: "video",
-				Data: map[string]interface{}{
-					"file": file,
-				},
-			}
-		}
-		return forwardMsgSegment{}
-	case *mmsg.FileElement:
-		file := e.GetFile()
-		if file != "" {
-			return forwardMsgSegment{
-				Type: "file",
-				Data: map[string]interface{}{
-					"file": file,
-				},
-			}
-		}
-		return forwardMsgSegment{}
+		return forwardMsgSegment{Type: "image", Data: map[string]interface{}{"file": file}}
+	case *adapter.VoiceSegment:
+		return forwardMsgSegment{Type: "record", Data: map[string]interface{}{"name": e.Name, "file": e.Url}}
+	case *adapter.VideoSegment:
+		return forwardMsgSegment{Type: "video", Data: map[string]interface{}{"name": e.Name, "file": e.Url}}
+	case *adapter.ReplySegment:
+		return forwardMsgSegment{Type: "reply", Data: map[string]interface{}{"id": e.ReplySeq}}
 	}
 	return forwardMsgSegment{}
 }

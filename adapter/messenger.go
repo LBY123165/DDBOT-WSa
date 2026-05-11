@@ -2,56 +2,46 @@ package adapter
 
 import (
 	"fmt"
+	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
+	"github.com/sirupsen/logrus"
+	"go.uber.org/atomic"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Mrs4s/MiraiGo/client"
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/Sora233/MiraiGo-Template/config"
-	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
-	"github.com/sirupsen/logrus"
-	"go.uber.org/atomic"
 )
 
 type BotEventDispatcher interface {
-	// Existing methods
-	DispatchGroupMessage(msg *message.GroupMessage)
-	DispatchPrivateMessage(msg *message.PrivateMessage)
-	DispatchGroupRecall(event *client.GroupMessageRecalledEvent)
-	DispatchFriendRecall(event *client.FriendMessageRecalledEvent)
-	DispatchGroupMute(event *client.GroupMuteEvent)
-	DispatchDisconnected(event *client.ClientDisconnectedEvent)
-
-	// New methods - Notice events
-	DispatchGroupMemberJoin(event *client.MemberJoinGroupEvent)
-	DispatchGroupMemberLeave(event *client.MemberLeaveGroupEvent)
-	DispatchGroupJoin(event *client.GroupInfo)
-	DispatchGroupLeave(event *client.GroupLeaveEvent)
-	DispatchGroupMemberPermissionChanged(event *client.MemberPermissionChangedEvent)
-	DispatchMemberCardUpdated(event *client.MemberCardUpdatedEvent)
-	DispatchMemberSpecialTitleUpdated(event *client.MemberSpecialTitleUpdatedEvent)
-	DispatchGroupUploadNotify(event *client.GroupUploadNotifyEvent)
-	DispatchGroupNotify(event client.INotifyEvent)
-	DispatchFriendNotify(event client.INotifyEvent)
-	DispatchGroupNameUpdated(event *client.GroupNameUpdatedEvent)
-	DispatchGroupEssenceChanged(event *client.GroupDigestEvent)
-	DispatchGroupDisband(event *client.GroupDisbandEvent)
-
-	// New methods - Request events
-	DispatchNewFriendRequest(event *client.NewFriendRequest)
-	DispatchNewFriend(event *client.NewFriendEvent)
-	DispatchUserJoinGroupRequest(event *client.UserJoinGroupRequest)
-	DispatchGroupInvitedRequest(event *client.GroupInvitedRequest)
-
-	// New methods - Bot events
-	DispatchBotOnline(event *client.BotOnlineEvent)
-	DispatchBotOffline(event *client.BotOfflineEvent)
-	DispatchGroupMsgEmojiLike(event *client.GroupMsgEmojiLikeEvent)
-	DispatchProfileLike(event *client.ProfileLikeEvent)
-	DispatchPokeRecall(event *client.PokeRecallEvent)
+	DispatchGroupMessage(msg *GroupMessage)
+	DispatchPrivateMessage(msg *PrivateMessage)
+	DispatchGroupRecall(event *GroupMessageRecalledEvent)
+	DispatchFriendRecall(event *FriendMessageRecalledEvent)
+	DispatchGroupMute(event *GroupMuteEvent)
+	DispatchDisconnected(event *ClientDisconnectedEvent)
+	DispatchGroupMemberJoin(event *MemberJoinGroupEvent)
+	DispatchGroupMemberLeave(event *MemberLeaveGroupEvent)
+	DispatchGroupJoin(event *GroupInfo)
+	DispatchGroupLeave(event *GroupLeaveEvent)
+	DispatchGroupMemberPermissionChanged(event *MemberPermissionChangedEvent)
+	DispatchMemberCardUpdated(event *MemberCardUpdatedEvent)
+	DispatchMemberSpecialTitleUpdated(event *MemberSpecialTitleUpdatedEvent)
+	DispatchGroupUploadNotify(event *GroupUploadNotifyEvent)
+	DispatchGroupNotify(event NotifyEvent)
+	DispatchFriendNotify(event NotifyEvent)
+	DispatchGroupNameUpdated(event *GroupNameUpdatedEvent)
+	DispatchGroupEssenceChanged(event *GroupDigestEvent)
+	DispatchGroupDisband(event *GroupDisbandEvent)
+	DispatchNewFriendRequest(event *NewFriendRequest)
+	DispatchNewFriend(event *NewFriendEvent)
+	DispatchUserJoinGroupRequest(event *UserJoinGroupRequest)
+	DispatchGroupInvitedRequest(event *GroupInvitedRequest)
+	DispatchBotOnline(event *BotOnlineEvent)
+	DispatchBotOffline(event *BotOfflineEvent)
+	DispatchGroupMsgEmojiLike(event *GroupMsgEmojiLikeEvent)
+	DispatchProfileLike(event *ProfileLikeEvent)
+	DispatchPokeRecall(event *PokeRecallEvent)
 }
 
 var messengerLogger = logrus.WithField("module", "messenger")
@@ -63,7 +53,7 @@ const (
 )
 
 type SendResp struct {
-	RetMSG *message.GroupMessage
+	RetMSG *GroupMessage
 	Error  error
 }
 
@@ -72,7 +62,7 @@ type SendResp struct {
 type offlineQueueMsg struct {
 	TargetId   int64
 	TargetType string
-	Message    *message.SendingMessage
+	Message    *SendingMessage
 	NewStr     string
 	CreatedAt  time.Time
 }
@@ -207,7 +197,7 @@ func (m *Messenger) GetSelfID() int64 {
 	return m.Adapter.GetSelfID()
 }
 
-func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessage, newstr string) SendResp {
+func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newstr string) SendResp {
 	// 检查离线队列条件
 	if getOfflineQueueEnable() && !m.Online.Load() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存消息: %s", sliceMessage(newstr))
@@ -218,7 +208,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 			NewStr:     newstr,
 			CreatedAt:  time.Now(),
 		})
-		return SendResp{RetMSG: &message.GroupMessage{Id: -1}, Error: nil}
+		return SendResp{RetMSG: &GroupMessage{ID: -1}, Error: nil}
 	}
 
 	// 获取群名称
@@ -237,8 +227,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 
 	var lastResult SendResp
 	for i, chunk := range chunks {
-		// 构建新的 SendingMessage
-		chunkMsg := &message.SendingMessage{Elements: parseChunkToElements(chunk)}
+		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
 		messages := m.buildMessageSegments(chunkMsg)
 
 		// 分片之间添加延迟，避免发送过快
@@ -251,16 +240,16 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 		if err != nil {
 			messengerLogger.Errorf("Send group message failed (chunk %d/%d): %v", i+1, len(chunks), err)
 			lastResult = SendResp{
-				RetMSG: &message.GroupMessage{Id: -1},
+				RetMSG: &GroupMessage{ID: -1},
 				Error:  err,
 			}
 		} else {
 			lastResult = SendResp{
-				RetMSG: &message.GroupMessage{
-					Id:        msgID,
+				RetMSG: &GroupMessage{
+					ID:        int64(msgID),
 					GroupCode: groupCode,
-					Sender: &message.Sender{
-						Uin: m.Uin,
+					Sender: &SenderInfo{
+						UserID: m.Uin,
 					},
 					Elements: chunkMsg.Elements,
 				},
@@ -272,7 +261,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 	return lastResult
 }
 
-func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage, newstr string) *message.PrivateMessage {
+func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
 	// 检查离线队列条件
 	if getOfflineQueueEnable() && !m.Online.Load() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
@@ -283,7 +272,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 			NewStr:     newstr,
 			CreatedAt:  time.Now(),
 		})
-		return &message.PrivateMessage{Id: -1}
+		return &PrivateMessage{ID: -1}
 	}
 
 	// 获取好友昵称
@@ -303,7 +292,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 	var lastMsgID int32 = -1
 	for i, chunk := range chunks {
 		// 构建新的 SendingMessage
-		chunkMsg := &message.SendingMessage{Elements: parseChunkToElements(chunk)}
+		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
 		messages := m.buildMessageSegments(chunkMsg)
 
 		// 分片之间添加延迟，避免发送过快
@@ -320,12 +309,12 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 		}
 	}
 
-	return &message.PrivateMessage{
-		Id:     lastMsgID,
-		Target: target,
+	return &PrivateMessage{
+		ID:     int64(lastMsgID),
+		UserID: target,
 		Self:   m.Uin,
-		Sender: &message.Sender{
-			Uin: m.Uin,
+		Sender: &SenderInfo{
+			UserID: m.Uin,
 		},
 		Elements: msg.Elements,
 	}
@@ -345,17 +334,17 @@ func (m *Messenger) SendPrivateForwardMessage(userID int64, nodes []map[string]i
 	return m.Adapter.SendPrivateForwardMessage(userID, nodes, options)
 }
 
-func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageSegment {
+func (m *Messenger) buildMessageSegments(msg *SendingMessage) []MessageSegment {
 	var segments []MessageSegment
 
 	for _, elem := range msg.Elements {
 		switch e := elem.(type) {
-		case *message.TextElement:
+		case *TextSegment:
 			segments = append(segments, MessageSegment{
 				Type: "text",
 				Data: map[string]interface{}{"text": e.Content},
 			})
-		case *message.AtElement:
+		case *AtSegment:
 			qq := "all"
 			if e.Target != 0 {
 				qq = fmt.Sprintf("%d", e.Target)
@@ -364,27 +353,24 @@ func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageS
 				Type: "at",
 				Data: map[string]interface{}{"qq": qq},
 			})
-		case *message.FaceElement:
+		case *FaceSegment:
 			segments = append(segments, MessageSegment{
 				Type: "face",
 				Data: map[string]interface{}{"id": e.Index},
 			})
-		case *message.GroupImageElement:
+		case *ImageSegment:
+			file := e.File
+			if file == "" {
+				file = e.Url
+			}
 			segments = append(segments, MessageSegment{
 				Type: "image",
 				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.Url,
+					"file": file,
+					"url":  e.Url,
 				},
 			})
-		case *message.FriendImageElement:
-			segments = append(segments, MessageSegment{
-				Type: "image",
-				Data: map[string]interface{}{
-					"file": e.Url,
-				},
-			})
-		case *message.VoiceElement:
+		case *VoiceSegment:
 			segments = append(segments, MessageSegment{
 				Type: "record",
 				Data: map[string]interface{}{
@@ -392,75 +378,37 @@ func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageS
 					"file": e.Url,
 				},
 			})
-		case *message.ReplyElement:
+		case *ReplySegment:
 			segments = append(segments, MessageSegment{
 				Type: "reply",
 				Data: map[string]interface{}{"id": e.ReplySeq},
 			})
-		case *message.ForwardElement:
+		case *ForwardSegment:
 			segments = append(segments, MessageSegment{
 				Type: "forward",
 				Data: map[string]interface{}{"id": e.ResId},
 			})
-		case *message.LightAppElement:
+		case *JsonSegment:
 			segments = append(segments, MessageSegment{
 				Type: "json",
 				Data: map[string]interface{}{"data": e.Content},
 			})
-		case *message.GroupFileElement:
+		case *FileSegment:
 			segments = append(segments, MessageSegment{
 				Type: "file",
 				Data: map[string]interface{}{
 					"name": e.Name,
-					"file": e.Url,
+					"id":   e.Id,
+					"url":  e.Url,
+					"file": e.Path,
 				},
 			})
-		case *message.FriendFileElement:
-			segments = append(segments, MessageSegment{
-				Type: "file",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.Url,
-				},
-			})
-		case *message.ImageElement:
-			segments = append(segments, MessageSegment{
-				Type: "image",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.VideoElement:
-			segments = append(segments, MessageSegment{
-				Type: "video",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.ShortVideoElement:
+		case *VideoSegment:
 			segments = append(segments, MessageSegment{
 				Type: "video",
 				Data: map[string]interface{}{
 					"name": e.Name,
 					"file": e.Url,
-				},
-			})
-		case *message.RecordElement:
-			segments = append(segments, MessageSegment{
-				Type: "record",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.FileElement:
-			segments = append(segments, MessageSegment{
-				Type: "file",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
 				},
 			})
 		}
@@ -609,7 +557,7 @@ func splitTextSmartWithLimit(text string, limit int) textSplitPart {
 // 2. 图片不超过 MaxImageCount (20)
 // 3. 独立类型(video/file/record/forward)必须单独发送
 // 4. 可组合类型尽量组合，直到超过限制才分片
-func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageSegment {
+func (m *Messenger) buildMessageChunks(msg *SendingMessage) [][]MessageSegment {
 	segments := m.buildMessageSegments(msg)
 
 	chunks := make([][]MessageSegment, 0, 10)
@@ -701,15 +649,15 @@ func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageS
 	return chunks
 }
 
-// parseChunkToElements 将 MessageSegment 分片转换回 message.IMessageElement 数组
-func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
+// parseChunkToElements 将 MessageSegment 分片转换回 adapter message element 数组
+func parseChunkToElements(chunk []MessageSegment) []IMessageElement {
+	var elements []IMessageElement
 
 	for _, seg := range chunk {
 		switch seg.Type {
 		case "text":
 			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
+				elements = append(elements, &TextSegment{Content: text})
 			}
 		case "at":
 			var target int64
@@ -725,7 +673,7 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 					target = 0
 				}
 			}
-			elements = append(elements, &message.AtElement{Target: target})
+			elements = append(elements, &AtSegment{Target: target})
 		case "face":
 			var faceId int64
 			if id, ok := seg.Data["id"].(float64); ok {
@@ -737,15 +685,15 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 					messengerLogger.Warnf("parse face id failed: %v, using 0", err)
 				}
 			}
-			elements = append(elements, &message.FaceElement{Index: int32(faceId)})
+			elements = append(elements, &FaceSegment{Index: int32(faceId)})
 		case "image":
-			elements = append(elements, &message.ImageElement{
+			elements = append(elements, &ImageSegment{
 				File: getString(seg.Data["file"]),
-				Name: getString(seg.Data["name"]),
+				Url:  getString(seg.Data["url"]),
 			})
 		case "record":
-			elements = append(elements, &message.RecordElement{
-				File: getString(seg.Data["file"]),
+			elements = append(elements, &VoiceSegment{
+				Url:  getString(seg.Data["file"]),
 				Name: getString(seg.Data["name"]),
 			})
 		case "reply":
@@ -756,25 +704,26 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 			} else {
 				messengerLogger.Warnf("parse reply seq failed: %v, using 0", err)
 			}
-			elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
+			elements = append(elements, &ReplySegment{ReplySeq: int32(replySeq)})
 		case "json":
 			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
+				elements = append(elements, &JsonSegment{Content: data})
 			}
 		case "forward":
 			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
+				elements = append(elements, &ForwardSegment{ResId: id})
 			}
 		case "file":
-			elements = append(elements, &message.FileElement{
+			elements = append(elements, &FileSegment{
 				Name: getString(seg.Data["name"]),
+				Id:   getString(seg.Data["id"]),
 				Url:  getString(seg.Data["url"]),
-				File: getString(seg.Data["file"]),
+				Path: getString(seg.Data["file"]),
 			})
 		case "video":
-			elements = append(elements, &message.VideoElement{
+			elements = append(elements, &VideoSegment{
 				Name: getString(seg.Data["name"]),
-				File: getString(seg.Data["file"]),
+				Url:  getString(seg.Data["file"]),
 			})
 		}
 	}
@@ -1120,7 +1069,7 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 
 	switch event.NoticeType {
 	case "group_ban":
-		m.eventDispatcher.DispatchGroupMute(&client.GroupMuteEvent{
+		m.eventDispatcher.DispatchGroupMute(&GroupMuteEvent{
 			GroupCode:   event.GroupID,
 			OperatorUin: event.OperatorID,
 			TargetUin:   event.UserID,
@@ -1154,19 +1103,19 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			} else {
 				messengerLogger.Debugf("Fetched %d members for group %d", len(members), event.GroupID)
 			}
-			// Build client.GroupInfo for dispatch
-			clientGroupInfo := &client.GroupInfo{
+			// Build GroupInfo for dispatch
+			clientGroupInfo := &GroupInfo{
 				Uin:         groupInfo.Uin,
 				Code:        groupInfo.Code,
 				Name:        groupInfo.Name,
-				MemberCount: uint16(groupInfo.MemberCount),
+				MemberCount: groupInfo.MemberCount,
 				OwnerUin:    groupInfo.OwnerUin,
 			}
-			// Also set Members for the client.GroupInfo
+			// Also set Members for the GroupInfo
 			if members != nil {
-				clientGroupInfo.Members = make([]*client.GroupMemberInfo, len(members))
+				clientGroupInfo.Members = make([]*GroupMemberInfo, len(members))
 				for i, mb := range members {
-					clientGroupInfo.Members[i] = &client.GroupMemberInfo{
+					clientGroupInfo.Members[i] = &GroupMemberInfo{
 						Group:    clientGroupInfo,
 						Uin:      mb.Uin,
 						Nickname: mb.Nickname,
@@ -1179,12 +1128,12 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			if err := m.AddGroupMember(event.GroupID, event.UserID); err != nil {
 				messengerLogger.WithError(err).Warnf("AddGroupMember failed for %d/%d", event.GroupID, event.UserID)
 			}
-			m.eventDispatcher.DispatchGroupMemberJoin(&client.MemberJoinGroupEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberJoin(&MemberJoinGroupEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin: event.UserID,
 				},
 			})
@@ -1196,12 +1145,12 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			group := m.FindGroupByUin(event.GroupID)
 			if group != nil {
 				// Save group info for the event
-				groupCopy := &client.GroupInfo{
+				groupCopy := &GroupInfo{
 					Uin:            group.Uin,
 					Code:           group.Code,
 					Name:           group.Name,
-					MemberCount:    uint16(group.MemberCount),
-					MaxMemberCount: uint16(group.MaxMemberCount),
+					MemberCount:    group.MemberCount,
+					MaxMemberCount: group.MaxMemberCount,
 				}
 				m.groupMu.Lock()
 				for i, g := range m.GroupList {
@@ -1211,23 +1160,23 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 					}
 				}
 				m.groupMu.Unlock()
-				m.eventDispatcher.DispatchGroupLeave(&client.GroupLeaveEvent{
+				m.eventDispatcher.DispatchGroupLeave(&GroupLeaveEvent{
 					Group:    groupCopy,
-					Operator: &client.GroupMemberInfo{Uin: event.OperatorID},
+					Operator: &GroupMemberInfo{Uin: event.OperatorID},
 				})
 			}
 		} else {
 			// Regular member left
 			m.RemoveGroupMember(event.GroupID, event.UserID)
-			m.eventDispatcher.DispatchGroupMemberLeave(&client.MemberLeaveGroupEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberLeave(&MemberLeaveGroupEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin: event.UserID,
 				},
-				Operator: &client.GroupMemberInfo{
+				Operator: &GroupMemberInfo{
 					Uin: event.OperatorID,
 				},
 			})
@@ -1243,39 +1192,39 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 			member.Permission = newPerm
 		})
 		if event.SubType == "set" {
-			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&client.MemberPermissionChangedEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&MemberPermissionChangedEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin:        event.UserID,
-					Permission: client.Administrator,
+					Permission: Administrator,
 				},
-				OldPermission: client.Member,
-				NewPermission: client.Administrator,
+				OldPermission: Member,
+				NewPermission: Administrator,
 			})
 		} else {
-			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&client.MemberPermissionChangedEvent{
-				Group: &client.GroupInfo{
+			m.eventDispatcher.DispatchGroupMemberPermissionChanged(&MemberPermissionChangedEvent{
+				Group: &GroupInfo{
 					Uin:  event.GroupID,
 					Code: event.GroupID,
 				},
-				Member: &client.GroupMemberInfo{
+				Member: &GroupMemberInfo{
 					Uin:        event.UserID,
-					Permission: client.Member,
+					Permission: Member,
 				},
-				OldPermission: client.Administrator,
-				NewPermission: client.Member,
+				OldPermission: Administrator,
+				NewPermission: Member,
 			})
 		}
 	case "group_card":
 		m.UpdateGroupMember(event.GroupID, event.UserID, func(member *GroupMemberInfo) {
 			member.CardName = event.CardNew
 		})
-		m.eventDispatcher.DispatchMemberCardUpdated(&client.MemberCardUpdatedEvent{
-			Group:   &client.GroupInfo{Uin: event.GroupID, Code: event.GroupID},
-			Member:  &client.GroupMemberInfo{Uin: event.UserID},
+		m.eventDispatcher.DispatchMemberCardUpdated(&MemberCardUpdatedEvent{
+			Group:   &GroupInfo{Uin: event.GroupID, Code: event.GroupID},
+			Member:  &GroupMemberInfo{Uin: event.UserID},
 			OldCard: event.CardOld,
 		})
 	case "friend_add":
@@ -1285,14 +1234,14 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 				nickname = name
 			}
 		}
-		m.eventDispatcher.DispatchNewFriend(&client.NewFriendEvent{
-			Friend: &client.FriendInfo{
+		m.eventDispatcher.DispatchNewFriend(&NewFriendEvent{
+			Friend: &FriendInfo{
 				Uin:      event.UserID,
 				Nickname: nickname,
 			},
 		})
 	case "friend_recall":
-		m.eventDispatcher.DispatchFriendRecall(&client.FriendMessageRecalledEvent{
+		m.eventDispatcher.DispatchFriendRecall(&FriendMessageRecalledEvent{
 			FriendUin: event.UserID,
 			MessageId: int32(event.MessageID),
 			Time:      event.Time,
@@ -1300,61 +1249,61 @@ func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
 	case "notify":
 		switch event.SubType {
 		case "poke":
-			m.eventDispatcher.DispatchGroupNotify(&client.GroupPokeNotifyEvent{
+			m.eventDispatcher.DispatchGroupNotify(&GroupPokeNotifyEvent{
 				GroupCode: event.GroupID,
 				Sender:    event.UserID,
 				Receiver:  event.OperatorID,
 			})
 		case "title":
-			m.eventDispatcher.DispatchMemberSpecialTitleUpdated(&client.MemberSpecialTitleUpdatedEvent{
+			m.eventDispatcher.DispatchMemberSpecialTitleUpdated(&MemberSpecialTitleUpdatedEvent{
 				GroupCode: event.GroupID,
 				Uin:       event.UserID,
 				NewTitle:  event.Title,
 			})
 		case "profile_like":
-			m.eventDispatcher.DispatchProfileLike(&client.ProfileLikeEvent{
+			m.eventDispatcher.DispatchProfileLike(&ProfileLikeEvent{
 				OperatorId:   event.OperatorID,
 				OperatorNick: event.OperatorNick,
 				Times:        event.Times,
 			})
 		case "poke_recall":
-			m.eventDispatcher.DispatchPokeRecall(&client.PokeRecallEvent{
+			m.eventDispatcher.DispatchPokeRecall(&PokeRecallEvent{
 				GroupCode: event.GroupID,
 				Sender:    event.UserID,
 				Receiver:  event.OperatorID,
 			})
 		}
 	case "group_recall":
-		m.eventDispatcher.DispatchGroupRecall(&client.GroupMessageRecalledEvent{
+		m.eventDispatcher.DispatchGroupRecall(&GroupMessageRecalledEvent{
 			GroupCode:   event.GroupID,
 			OperatorUin: event.OperatorID,
 			AuthorUin:   event.UserID,
 			MessageId:   int32(event.MessageID),
 		})
 	case "essence":
-		m.eventDispatcher.DispatchGroupEssenceChanged(&client.GroupDigestEvent{
+		m.eventDispatcher.DispatchGroupEssenceChanged(&GroupDigestEvent{
 			GroupCode: event.GroupID,
 		})
 	case "group_upload":
-		m.eventDispatcher.DispatchGroupUploadNotify(&client.GroupUploadNotifyEvent{
+		m.eventDispatcher.DispatchGroupUploadNotify(&GroupUploadNotifyEvent{
 			GroupCode: event.GroupID,
 			Sender:    event.UserID,
 			File:      event.File,
 		})
 	case "bot_offline":
-		m.eventDispatcher.DispatchBotOffline(&client.BotOfflineEvent{})
+		m.eventDispatcher.DispatchBotOffline(&BotOfflineEvent{})
 	case "group_dismiss":
-		m.eventDispatcher.DispatchGroupDisband(&client.GroupDisbandEvent{
-			Group: &client.GroupInfo{
+		m.eventDispatcher.DispatchGroupDisband(&GroupDisbandEvent{
+			Group: &GroupInfo{
 				Uin:  event.GroupID,
 				Code: event.GroupID,
 			},
-			Operator: &client.GroupMemberInfo{
+			Operator: &GroupMemberInfo{
 				Uin: event.UserID,
 			},
 		})
 	case "group_msg_emoji_like":
-		m.eventDispatcher.DispatchGroupMsgEmojiLike(&client.GroupMsgEmojiLikeEvent{
+		m.eventDispatcher.DispatchGroupMsgEmojiLike(&GroupMsgEmojiLikeEvent{
 			GroupCode:  event.GroupID,
 			UserId:     event.UserID,
 			MessageId:  event.MessageID,
@@ -1372,7 +1321,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 
 	switch event.RequestType {
 	case "friend":
-		m.eventDispatcher.DispatchNewFriendRequest(&client.NewFriendRequest{
+		m.eventDispatcher.DispatchNewFriendRequest(&NewFriendRequest{
 			RequestId:     time.Now().UnixNano() / 1e6,
 			Message:       event.Comment,
 			RequesterUin:  event.UserID,
@@ -1381,7 +1330,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 		})
 	case "group":
 		if event.SubType == "add" {
-			m.eventDispatcher.DispatchUserJoinGroupRequest(&client.UserJoinGroupRequest{
+			m.eventDispatcher.DispatchUserJoinGroupRequest(&UserJoinGroupRequest{
 				RequestId:     time.Now().UnixNano() / 1e6,
 				Message:       event.Comment,
 				RequesterUin:  event.UserID,
@@ -1390,7 +1339,7 @@ func (m *Messenger) handleRequestEvent(event *RequestEvent) {
 				Flag:          event.Flag,
 			})
 		} else if event.SubType == "invite" {
-			m.eventDispatcher.DispatchGroupInvitedRequest(&client.GroupInvitedRequest{
+			m.eventDispatcher.DispatchGroupInvitedRequest(&GroupInvitedRequest{
 				RequestId:   time.Now().UnixNano() / 1e6,
 				InvitorUin:  event.UserID,
 				InvitorNick: "陌生人",
@@ -1405,30 +1354,31 @@ func (m *Messenger) handleGroupMessage(event *GroupMessageEvent) {
 	m.groupMsgCount.Add(1)
 	messengerLogger.Debugf("handleGroupMessage called: group=%d, user=%d, msgID=%d", event.GroupID, event.UserID, event.MessageID)
 
-	msg := &message.GroupMessage{
-
-		Id:        int32(event.MessageID),
-		GroupCode: event.GroupID,
-		GroupName: "",
-		Sender: &message.Sender{
-			Uin:      event.UserID,
-			Nickname: "",
-			IsFriend: false,
-		},
-		Time: int32(event.Time),
+	sender := &SenderInfo{
+		UserID: event.UserID,
 	}
-
-	elements := m.parseMessageSegments(event.Message)
-	msg.Elements = elements
-
 	group := m.FindGroup(event.GroupID)
 	if group != nil {
-		msg.GroupName = group.Name
 		member := group.FindMember(event.UserID)
 		if member != nil {
-			msg.Sender.Nickname = member.Nickname
-			msg.Sender.CardName = member.CardName
+			sender.Nickname = member.Nickname
+			sender.Card = member.CardName
 		}
+	}
+
+	elements := ConvertToMessageElements(event.Message)
+
+	groupName := ""
+	if group != nil {
+		groupName = group.Name
+	}
+	msg := &GroupMessage{
+		ID:        int64(event.MessageID),
+		GroupCode: event.GroupID,
+		GroupName: groupName,
+		Sender:    sender,
+		Time:      event.Time,
+		Elements:  elements,
 	}
 
 	messengerLogger.Debugf("收到群 %d 内 %d 的消息", event.GroupID, event.UserID)
@@ -1452,99 +1402,25 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 			}
 		}
 	}
-	msg := &message.PrivateMessage{
-		Id:     int32(event.MessageID),
-		Target: event.UserID,
-		Self:   event.SelfID,
-		Sender: &message.Sender{
-			Uin:      event.UserID,
-			Nickname: nickname,
-			IsFriend: isFriend,
-		},
-		Time: int32(event.Time),
-	}
 
-	elements := m.parseMessageSegments(event.Message)
-	msg.Elements = elements
+	elements := ConvertToMessageElements(event.Message)
+	msg := &PrivateMessage{
+		ID:     int64(event.MessageID),
+		UserID: event.UserID,
+		Self:   event.SelfID,
+		Sender: &SenderInfo{
+			UserID:   event.UserID,
+			Nickname: nickname,
+		},
+		Time:     event.Time,
+		Elements: elements,
+	}
 
 	messengerLogger.Debugf("收到 %d 的私聊消息", event.UserID)
 
 	if m.eventDispatcher != nil {
 		m.eventDispatcher.DispatchPrivateMessage(msg)
 	}
-}
-
-func (m *Messenger) parseMessageSegments(segments []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
-
-	for _, seg := range segments {
-		switch seg.Type {
-		case "text":
-			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
-			}
-		case "at":
-			var target int64
-			if qq, ok := seg.Data["qq"].(float64); ok {
-				target = int64(qq)
-			} else if qq, ok := seg.Data["qq"].(string); ok {
-				if qq == "all" {
-					target = 0
-				} else if n, err := strconv.ParseInt(qq, 10, 64); err == nil {
-					target = n
-				}
-			}
-			if target != 0 || seg.Data["qq"] == "all" {
-				elements = append(elements, &message.AtElement{Target: target})
-			}
-		case "face":
-			var faceId int64
-			if id, ok := seg.Data["id"].(float64); ok {
-				faceId = int64(id)
-			} else if id, ok := seg.Data["id"].(string); ok {
-				faceId, _ = strconv.ParseInt(id, 10, 64)
-			}
-			if faceId != 0 {
-				elements = append(elements, &message.FaceElement{Index: int32(faceId)})
-			}
-		case "image":
-			elements = append(elements, &message.GroupImageElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
-			})
-		case "record":
-			elements = append(elements, &message.VoiceElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
-			})
-		case "reply":
-			var replySeq int64
-			if id, ok := seg.Data["id"].(float64); ok {
-				replySeq = int64(id)
-			} else if id, ok := seg.Data["id"].(string); ok {
-				replySeq, _ = strconv.ParseInt(id, 10, 64)
-			}
-			if replySeq != 0 {
-				elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
-			}
-		case "json":
-			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
-			}
-		case "forward":
-			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
-			}
-		case "file":
-			elements = append(elements, &message.GroupFileElement{
-				Name: getString(seg.Data["name"]),
-				Id:   getString(seg.Data["id"]),
-				Url:  getString(seg.Data["url"]),
-			})
-		}
-	}
-
-	return elements
 }
 
 func (m *Messenger) SendApi(action string, params map[string]interface{}) (interface{}, error) {

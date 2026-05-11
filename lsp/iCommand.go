@@ -217,11 +217,11 @@ func IWatch(c *MessageContext, groupCode int64, id string, site string, watchTyp
 	}
 
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
-		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
-		permission.QQAdminRequireOption(groupCode, c.Sender.Uin),
-		permission.GroupCommandRequireOption(groupCode, c.Sender.Uin, WatchCommand),
-		permission.GroupCommandRequireOption(groupCode, c.Sender.Uin, UnwatchCommand),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
+		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
+		permission.QQAdminRequireOption(groupCode, c.Sender.UserID),
+		permission.GroupCommandRequireOption(groupCode, c.Sender.UserID, WatchCommand),
+		permission.GroupCommandRequireOption(groupCode, c.Sender.UserID, UnwatchCommand),
 	) {
 		c.NoPermissionReply()
 		return
@@ -285,8 +285,8 @@ func IEnable(c *MessageContext, groupCode int64, command string, disable bool) {
 	log := c.Log
 
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
-		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
+		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
 	) {
 		c.NoPermissionReply()
 		return
@@ -336,8 +336,8 @@ func IGrantRole(c *MessageContext, groupCode int64, grantRole permission.RoleTyp
 	switch grantRole {
 	case permission.GroupAdmin:
 		if !c.Lsp.PermissionStateManager.RequireAny(
-			permission.AdminRoleRequireOption(c.Sender.Uin),
-			permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
+			permission.AdminRoleRequireOption(c.Sender.UserID),
+			permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
 		) {
 			c.NoPermissionReply()
 			return
@@ -354,7 +354,7 @@ func IGrantRole(c *MessageContext, groupCode int64, grantRole permission.RoleTyp
 		}
 	case permission.Admin:
 		if !c.Lsp.PermissionStateManager.RequireAny(
-			permission.AdminRoleRequireOption(c.Sender.Uin),
+			permission.AdminRoleRequireOption(c.Sender.UserID),
 		) {
 			c.NoPermissionReply()
 			return
@@ -388,9 +388,9 @@ func IGrantCmd(c *MessageContext, groupCode int64, command string, grantTo int64
 	log := c.Log.WithField("command", command)
 
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
-		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
-		permission.QQAdminRequireOption(groupCode, c.Sender.Uin),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
+		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
+		permission.QQAdminRequireOption(groupCode, c.Sender.UserID),
 	) {
 		c.NoPermissionReply()
 		return
@@ -435,7 +435,7 @@ func ISilenceCmd(c *MessageContext, groupCode int64, delete bool) {
 	var err error
 	if groupCode == 0 {
 		if !c.Lsp.PermissionStateManager.RequireAny(
-			permission.AdminRoleRequireOption(c.Sender.Uin),
+			permission.AdminRoleRequireOption(c.Sender.UserID),
 		) {
 			c.NoPermissionReply()
 			return
@@ -454,8 +454,8 @@ func ISilenceCmd(c *MessageContext, groupCode int64, delete bool) {
 	}
 
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
-		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
+		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
 	) {
 		c.NoPermissionReply()
 		return
@@ -795,10 +795,10 @@ func configCmdGroupCommonCheck(c *MessageContext, groupCode int64) error {
 	}
 
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
-		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.Uin),
-		permission.QQAdminRequireOption(groupCode, c.Sender.Uin),
-		permission.GroupCommandRequireOption(groupCode, c.Sender.Uin, ConfigCommand),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
+		permission.GroupAdminRoleRequireOption(groupCode, c.Sender.UserID),
+		permission.QQAdminRequireOption(groupCode, c.Sender.UserID),
+		permission.GroupCommandRequireOption(groupCode, c.Sender.UserID, ConfigCommand),
 	) {
 		c.NoPermissionReply()
 		return permission.ErrPermissionDenied
@@ -938,7 +938,7 @@ func operateExtendNotifyConcernConfig(c *MessageContext, ctype concern_type.Type
 
 func IAbnormalConcernCheck(c *MessageContext) {
 	if !c.Lsp.PermissionStateManager.RequireAny(
-		permission.AdminRoleRequireOption(c.Sender.Uin),
+		permission.AdminRoleRequireOption(c.Sender.UserID),
 	) {
 		c.NoPermissionReply()
 		return

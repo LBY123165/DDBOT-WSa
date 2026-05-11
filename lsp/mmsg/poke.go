@@ -1,9 +1,8 @@
 package mmsg
 
 import (
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
-	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
+	"github.com/cnxysoft/DDBOT-WSa/utils"
 )
 
 type PokeElement struct {
@@ -14,12 +13,16 @@ func NewPoke(uin int64) *PokeElement {
 	return &PokeElement{Uin: uin}
 }
 
-func (p *PokeElement) Type() message.ElementType {
+func (p *PokeElement) Type() adapter.ElementType {
 	return Poke
 }
 
-func (p *PokeElement) PackToElement(target Target) message.IMessageElement {
-	botInstance := localutils.GetBotInstance()
+func (p *PokeElement) ToSendingMessage() *adapter.SendingMessage {
+	return &adapter.SendingMessage{Elements: []adapter.IMessageElement{p}}
+}
+
+func (p *PokeElement) PackToElement(target Target) adapter.IMessageElement {
+	botInstance := utils.GetBotInstance()
 	if botInstance == nil {
 		return nil
 	}

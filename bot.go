@@ -71,23 +71,6 @@ func SetUpLog() {
 
 // Run 启动 bot，这个函数会阻塞直到收到退出信号
 func Run() {
-	if fi, err := os.Stat("device.json"); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("警告：没有检测到 device.json，正在生成，如果是第一次运行，可忽略")
-			bot.GenRandomDevice()
-		} else {
-			warn.Warn(fmt.Sprintf("检查 device.json 文件失败 - %v", err))
-			os.Exit(1)
-		}
-	} else {
-		if fi.IsDir() {
-			warn.Warn("检测到 device.json，但目标是一个文件夹！请手动确认并删除该文件夹！")
-			os.Exit(1)
-		} else {
-			fmt.Println("检测到 device.json，使用存在的 device.json")
-		}
-	}
-
 	if fi, err := os.Stat("application.yaml"); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("警告：没有检测到配置文件 application.yaml，正在生成，如果是第一次运行，可忽略")
@@ -146,9 +129,6 @@ func Run() {
 	bot.StartService()
 
 	_, _ = admin.Start(&bot.Instance.Online, nil)
-
-	// 登录 跳过登录
-	//bot.Login()
 
 	// 刷新好友列表，群列表
 	//以后刷新
