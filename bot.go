@@ -130,9 +130,6 @@ func Run() {
 
 	_, _ = admin.Start(&bot.Instance.Online, nil)
 
-	// 登录 跳过登录
-	//bot.Login()
-
 	// 刷新好友列表，群列表
 	//以后刷新
 	// bot.RefreshList()

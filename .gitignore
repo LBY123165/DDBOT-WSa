@@ -3,7 +3,6 @@ DDBOT
 /.coverage.out
 /coverage.html
 /qrcode.png
-/session.token
 /dist/
 /version*.json
 /debug

@@ -13,15 +13,10 @@ import (
 	"go.uber.org/atomic"
 )
 
-var reloginLock = new(sync.Mutex)
-
-const sessionToken = "session.token"
-
 type Bot struct {
 	*adapter.Messenger
 
-	start    bool
-	isQRCode bool
+	start bool
 
 	Uin        int64
 	Online     atomic.Bool
@@ -34,7 +29,6 @@ type Bot struct {
 	groupListLock  sync.Mutex
 	friendListLock sync.Mutex
 
-	QQClient                          interface{}
 	GroupMessageRecalledEvent         *EventHandle[*adapter.GroupMessageRecalledEvent]
 	GroupMessageEvent                 *EventHandle[*adapter.GroupMessage]
 	GroupMuteEvent                    *EventHandle[*adapter.GroupMuteEvent]
@@ -247,29 +241,6 @@ func (bot *Bot) GetFriendList() []*adapter.FriendInfo {
 	return nil
 }
 
-func (bot *Bot) saveToken() {
-	// 无需保存 token，因为使用适配器
-}
-
-func (bot *Bot) clearToken() {
-	// 无需清理 token
-}
-
-func (bot *Bot) getToken() ([]byte, error) {
-	// 返回空，因为使用适配器
-	return []byte{}, nil
-}
-
-func (bot *Bot) ReLogin(e interface{}) error {
-	reloginLock.Lock()
-	defer reloginLock.Unlock()
-
-	if !bot.Online.Load() {
-		logger.Info("Bot offline")
-	}
-	return nil
-}
-
 // Instance Bot 实例
 var Instance *Bot
 
@@ -306,7 +277,6 @@ func Init() {
 	Instance = &Bot{
 		Messenger:                         messenger,
 		start:                             false,
-		QQClient:                          nil,
 		GroupMessageRecalledEvent:         &EventHandle[*adapter.GroupMessageRecalledEvent]{},
 		GroupMessageEvent:                 &EventHandle[*adapter.GroupMessage]{},
 		GroupMuteEvent:                    &EventHandle[*adapter.GroupMuteEvent]{},
@@ -396,10 +366,6 @@ func refreshList() {
 	logger.Info("load members done.")
 }
 
-func Login() {
-	logger.Info("Adapter mode: no login required")
-}
-
 func RefreshList() {
 	refreshList()
 }
@@ -458,46 +424,6 @@ func getModuleNames() []string {
 		names = append(names, string(mi.ID))
 	}
 	return names
-}
-
-type LoginResponse struct {
-	Success bool
-}
-
-func (bot *Bot) Login() (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) FetchQRCode() (interface{}, error) {
-	return []byte{}, nil
-}
-
-func (bot *Bot) FetchQRCodeCustomSize(a, b, c uint32) (interface{}, error) {
-	return []byte{}, nil
-}
-
-func (bot *Bot) QueryQRCodeStatus([]byte) (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) QRCodeLogin(interface{}) (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) SubmitTicket(string) (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) SubmitCaptcha(string, []byte) (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
-}
-
-func (bot *Bot) RequestSMS() bool {
-	return false
-}
-
-func (bot *Bot) SubmitSMS(string) (interface{}, error) {
-	return &LoginResponse{Success: true}, nil
 }
 
 func (bot *Bot) DispatchGroupMessage(msg *adapter.GroupMessage) {

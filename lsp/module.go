@@ -685,9 +685,6 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		if config.GlobalConfig.GetString("bot.onDisconnected") == "exit" {
 			logger.Fatalf("onDisconnected设置为exit，bot将自动退出")
 		}
-		if err := bot.ReLogin(event); err != nil {
-			logger.Fatalf("重连时发生错误%v，bot将自动退出", err)
-		}
 	})
 
 	bot.MemberCardUpdatedEvent.Subscribe(func(event *adapter.MemberCardUpdatedEvent) {
@@ -1189,7 +1186,6 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 }
 
 // sendGroupMessage 发送一条消息，返回值总是非nil，ID为-1表示发送失败
-// miraigo偶尔发送消息会panic？！
 func (l *Lsp) sendGroupMessage(groupCode int64, msg *adapter.SendingMessage, recovered ...bool) (res *adapter.GroupMessage) {
 	defer func() {
 		if e := recover(); e != nil {
