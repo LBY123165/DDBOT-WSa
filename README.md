@@ -11,7 +11,7 @@ DDBOT-WSa 是基于 DDBOT-ws 的修改版本，目的是恢复DDBOT的原有功�
 
 **目前已经修复所有的主要指令（奇奇怪怪的指令没测试）。**
 
-DDBOT是一个基于 [MiraiGO](https://github.com/Mrs4s/MiraiGo) 的QQ群推送框架， 内置支持b站直播/动态，斗鱼直播，YTB直播/预约直播，虎牙直播，ACFUN直播，微博动态，
+DDBOT是一个通过 WebSocket 连接 OneBot 兼容平台的QQ群推送框架，内置支持b站直播/动态，斗鱼直播，YTB直播/预约直播，虎牙直播，ACFUN直播，微博动态，
 也可以通过插件支持任何订阅源。
 
 *DDBOT不是一个聊天机器人。*
