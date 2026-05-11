@@ -2,17 +2,15 @@ package adapter
 
 import (
 	"fmt"
+	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
+	"github.com/sirupsen/logrus"
+	"go.uber.org/atomic"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/Sora233/MiraiGo-Template/config"
-	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
-	"github.com/sirupsen/logrus"
-	"go.uber.org/atomic"
 )
 
 type BotEventDispatcher interface {
@@ -55,7 +53,7 @@ const (
 )
 
 type SendResp struct {
-	RetMSG *message.GroupMessage
+	RetMSG *GroupMessage
 	Error  error
 }
 
@@ -64,7 +62,7 @@ type SendResp struct {
 type offlineQueueMsg struct {
 	TargetId   int64
 	TargetType string
-	Message    *message.SendingMessage
+	Message    *SendingMessage
 	NewStr     string
 	CreatedAt  time.Time
 }
@@ -199,7 +197,7 @@ func (m *Messenger) GetSelfID() int64 {
 	return m.Adapter.GetSelfID()
 }
 
-func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessage, newstr string) SendResp {
+func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newstr string) SendResp {
 	// 检查离线队列条件
 	if getOfflineQueueEnable() && !m.Online.Load() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存消息: %s", sliceMessage(newstr))
@@ -210,7 +208,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 			NewStr:     newstr,
 			CreatedAt:  time.Now(),
 		})
-		return SendResp{RetMSG: &message.GroupMessage{Id: -1}, Error: nil}
+		return SendResp{RetMSG: &GroupMessage{ID: -1}, Error: nil}
 	}
 
 	// 获取群名称
@@ -229,8 +227,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 
 	var lastResult SendResp
 	for i, chunk := range chunks {
-		// 构建新的 SendingMessage
-		chunkMsg := &message.SendingMessage{Elements: parseChunkToElements(chunk)}
+		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
 		messages := m.buildMessageSegments(chunkMsg)
 
 		// 分片之间添加延迟，避免发送过快
@@ -243,16 +240,16 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 		if err != nil {
 			messengerLogger.Errorf("Send group message failed (chunk %d/%d): %v", i+1, len(chunks), err)
 			lastResult = SendResp{
-				RetMSG: &message.GroupMessage{Id: -1},
+				RetMSG: &GroupMessage{ID: -1},
 				Error:  err,
 			}
 		} else {
 			lastResult = SendResp{
-				RetMSG: &message.GroupMessage{
-					Id:        msgID,
+				RetMSG: &GroupMessage{
+					ID:        int64(msgID),
 					GroupCode: groupCode,
-					Sender: &message.Sender{
-						Uin: m.Uin,
+					Sender: &SenderInfo{
+						UserID: m.Uin,
 					},
 					Elements: chunkMsg.Elements,
 				},
@@ -264,7 +261,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *message.SendingMessag
 	return lastResult
 }
 
-func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage, newstr string) *message.PrivateMessage {
+func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
 	// 检查离线队列条件
 	if getOfflineQueueEnable() && !m.Online.Load() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
@@ -275,7 +272,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 			NewStr:     newstr,
 			CreatedAt:  time.Now(),
 		})
-		return &message.PrivateMessage{Id: -1}
+		return &PrivateMessage{ID: -1}
 	}
 
 	// 获取好友昵称
@@ -295,7 +292,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 	var lastMsgID int32 = -1
 	for i, chunk := range chunks {
 		// 构建新的 SendingMessage
-		chunkMsg := &message.SendingMessage{Elements: parseChunkToElements(chunk)}
+		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
 		messages := m.buildMessageSegments(chunkMsg)
 
 		// 分片之间添加延迟，避免发送过快
@@ -312,12 +309,12 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *message.SendingMessage
 		}
 	}
 
-	return &message.PrivateMessage{
-		Id:     lastMsgID,
-		Target: target,
+	return &PrivateMessage{
+		ID:     int64(lastMsgID),
+		UserID: target,
 		Self:   m.Uin,
-		Sender: &message.Sender{
-			Uin: m.Uin,
+		Sender: &SenderInfo{
+			UserID: m.Uin,
 		},
 		Elements: msg.Elements,
 	}
@@ -337,17 +334,17 @@ func (m *Messenger) SendPrivateForwardMessage(userID int64, nodes []map[string]i
 	return m.Adapter.SendPrivateForwardMessage(userID, nodes, options)
 }
 
-func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageSegment {
+func (m *Messenger) buildMessageSegments(msg *SendingMessage) []MessageSegment {
 	var segments []MessageSegment
 
 	for _, elem := range msg.Elements {
 		switch e := elem.(type) {
-		case *message.TextElement:
+		case *TextSegment:
 			segments = append(segments, MessageSegment{
 				Type: "text",
 				Data: map[string]interface{}{"text": e.Content},
 			})
-		case *message.AtElement:
+		case *AtSegment:
 			qq := "all"
 			if e.Target != 0 {
 				qq = fmt.Sprintf("%d", e.Target)
@@ -356,27 +353,24 @@ func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageS
 				Type: "at",
 				Data: map[string]interface{}{"qq": qq},
 			})
-		case *message.FaceElement:
+		case *FaceSegment:
 			segments = append(segments, MessageSegment{
 				Type: "face",
 				Data: map[string]interface{}{"id": e.Index},
 			})
-		case *message.GroupImageElement:
+		case *ImageSegment:
+			file := e.File
+			if file == "" {
+				file = e.Url
+			}
 			segments = append(segments, MessageSegment{
 				Type: "image",
 				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.Url,
+					"file": file,
+					"url":  e.Url,
 				},
 			})
-		case *message.FriendImageElement:
-			segments = append(segments, MessageSegment{
-				Type: "image",
-				Data: map[string]interface{}{
-					"file": e.Url,
-				},
-			})
-		case *message.VoiceElement:
+		case *VoiceSegment:
 			segments = append(segments, MessageSegment{
 				Type: "record",
 				Data: map[string]interface{}{
@@ -384,75 +378,37 @@ func (m *Messenger) buildMessageSegments(msg *message.SendingMessage) []MessageS
 					"file": e.Url,
 				},
 			})
-		case *message.ReplyElement:
+		case *ReplySegment:
 			segments = append(segments, MessageSegment{
 				Type: "reply",
 				Data: map[string]interface{}{"id": e.ReplySeq},
 			})
-		case *message.ForwardElement:
+		case *ForwardSegment:
 			segments = append(segments, MessageSegment{
 				Type: "forward",
 				Data: map[string]interface{}{"id": e.ResId},
 			})
-		case *message.LightAppElement:
+		case *JsonSegment:
 			segments = append(segments, MessageSegment{
 				Type: "json",
 				Data: map[string]interface{}{"data": e.Content},
 			})
-		case *message.GroupFileElement:
+		case *FileSegment:
 			segments = append(segments, MessageSegment{
 				Type: "file",
 				Data: map[string]interface{}{
 					"name": e.Name,
-					"file": e.Url,
+					"id":   e.Id,
+					"url":  e.Url,
+					"file": e.Path,
 				},
 			})
-		case *message.FriendFileElement:
-			segments = append(segments, MessageSegment{
-				Type: "file",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.Url,
-				},
-			})
-		case *message.ImageElement:
-			segments = append(segments, MessageSegment{
-				Type: "image",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.VideoElement:
-			segments = append(segments, MessageSegment{
-				Type: "video",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.ShortVideoElement:
+		case *VideoSegment:
 			segments = append(segments, MessageSegment{
 				Type: "video",
 				Data: map[string]interface{}{
 					"name": e.Name,
 					"file": e.Url,
-				},
-			})
-		case *message.RecordElement:
-			segments = append(segments, MessageSegment{
-				Type: "record",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
-				},
-			})
-		case *message.FileElement:
-			segments = append(segments, MessageSegment{
-				Type: "file",
-				Data: map[string]interface{}{
-					"name": e.Name,
-					"file": e.File,
 				},
 			})
 		}
@@ -601,7 +557,7 @@ func splitTextSmartWithLimit(text string, limit int) textSplitPart {
 // 2. 图片不超过 MaxImageCount (20)
 // 3. 独立类型(video/file/record/forward)必须单独发送
 // 4. 可组合类型尽量组合，直到超过限制才分片
-func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageSegment {
+func (m *Messenger) buildMessageChunks(msg *SendingMessage) [][]MessageSegment {
 	segments := m.buildMessageSegments(msg)
 
 	chunks := make([][]MessageSegment, 0, 10)
@@ -693,15 +649,15 @@ func (m *Messenger) buildMessageChunks(msg *message.SendingMessage) [][]MessageS
 	return chunks
 }
 
-// parseChunkToElements 将 MessageSegment 分片转换回 message.IMessageElement 数组
-func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
+// parseChunkToElements 将 MessageSegment 分片转换回 adapter message element 数组
+func parseChunkToElements(chunk []MessageSegment) []IMessageElement {
+	var elements []IMessageElement
 
 	for _, seg := range chunk {
 		switch seg.Type {
 		case "text":
 			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
+				elements = append(elements, &TextSegment{Content: text})
 			}
 		case "at":
 			var target int64
@@ -717,7 +673,7 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 					target = 0
 				}
 			}
-			elements = append(elements, &message.AtElement{Target: target})
+			elements = append(elements, &AtSegment{Target: target})
 		case "face":
 			var faceId int64
 			if id, ok := seg.Data["id"].(float64); ok {
@@ -729,15 +685,15 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 					messengerLogger.Warnf("parse face id failed: %v, using 0", err)
 				}
 			}
-			elements = append(elements, &message.FaceElement{Index: int32(faceId)})
+			elements = append(elements, &FaceSegment{Index: int32(faceId)})
 		case "image":
-			elements = append(elements, &message.ImageElement{
+			elements = append(elements, &ImageSegment{
 				File: getString(seg.Data["file"]),
-				Name: getString(seg.Data["name"]),
+				Url:  getString(seg.Data["url"]),
 			})
 		case "record":
-			elements = append(elements, &message.RecordElement{
-				File: getString(seg.Data["file"]),
+			elements = append(elements, &VoiceSegment{
+				Url:  getString(seg.Data["file"]),
 				Name: getString(seg.Data["name"]),
 			})
 		case "reply":
@@ -748,25 +704,26 @@ func parseChunkToElements(chunk []MessageSegment) []message.IMessageElement {
 			} else {
 				messengerLogger.Warnf("parse reply seq failed: %v, using 0", err)
 			}
-			elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
+			elements = append(elements, &ReplySegment{ReplySeq: int32(replySeq)})
 		case "json":
 			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
+				elements = append(elements, &JsonSegment{Content: data})
 			}
 		case "forward":
 			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
+				elements = append(elements, &ForwardSegment{ResId: id})
 			}
 		case "file":
-			elements = append(elements, &message.FileElement{
+			elements = append(elements, &FileSegment{
 				Name: getString(seg.Data["name"]),
+				Id:   getString(seg.Data["id"]),
 				Url:  getString(seg.Data["url"]),
-				File: getString(seg.Data["file"]),
+				Path: getString(seg.Data["file"]),
 			})
 		case "video":
-			elements = append(elements, &message.VideoElement{
+			elements = append(elements, &VideoSegment{
 				Name: getString(seg.Data["name"]),
-				File: getString(seg.Data["file"]),
+				Url:  getString(seg.Data["file"]),
 			})
 		}
 	}
@@ -1409,15 +1366,19 @@ func (m *Messenger) handleGroupMessage(event *GroupMessageEvent) {
 		}
 	}
 
-	elements := m.parseMessageSegments(event.Message)
+	elements := ConvertToMessageElements(event.Message)
 
+	groupName := ""
+	if group != nil {
+		groupName = group.Name
+	}
 	msg := &GroupMessage{
 		ID:        int64(event.MessageID),
 		GroupCode: event.GroupID,
-		GroupName: group.Name,
+		GroupName: groupName,
 		Sender:    sender,
 		Time:      event.Time,
-		Elements:  AdaptElements(elements),
+		Elements:  elements,
 	}
 
 	messengerLogger.Debugf("收到群 %d 内 %d 的消息", event.GroupID, event.UserID)
@@ -1442,7 +1403,7 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 		}
 	}
 
-	elements := m.parseMessageSegments(event.Message)
+	elements := ConvertToMessageElements(event.Message)
 	msg := &PrivateMessage{
 		ID:     int64(event.MessageID),
 		UserID: event.UserID,
@@ -1452,7 +1413,7 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 			Nickname: nickname,
 		},
 		Time:     event.Time,
-		Elements: AdaptElements(elements),
+		Elements: elements,
 	}
 
 	messengerLogger.Debugf("收到 %d 的私聊消息", event.UserID)
@@ -1460,79 +1421,6 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 	if m.eventDispatcher != nil {
 		m.eventDispatcher.DispatchPrivateMessage(msg)
 	}
-}
-
-func (m *Messenger) parseMessageSegments(segments []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
-
-	for _, seg := range segments {
-		switch seg.Type {
-		case "text":
-			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
-			}
-		case "at":
-			var target int64
-			if qq, ok := seg.Data["qq"].(float64); ok {
-				target = int64(qq)
-			} else if qq, ok := seg.Data["qq"].(string); ok {
-				if qq == "all" {
-					target = 0
-				} else if n, err := strconv.ParseInt(qq, 10, 64); err == nil {
-					target = n
-				}
-			}
-			if target != 0 || seg.Data["qq"] == "all" {
-				elements = append(elements, &message.AtElement{Target: target})
-			}
-		case "face":
-			var faceId int64
-			if id, ok := seg.Data["id"].(float64); ok {
-				faceId = int64(id)
-			} else if id, ok := seg.Data["id"].(string); ok {
-				faceId, _ = strconv.ParseInt(id, 10, 64)
-			}
-			if faceId != 0 {
-				elements = append(elements, &message.FaceElement{Index: int32(faceId)})
-			}
-		case "image":
-			elements = append(elements, &message.GroupImageElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
-			})
-		case "record":
-			elements = append(elements, &message.VoiceElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
-			})
-		case "reply":
-			var replySeq int64
-			if id, ok := seg.Data["id"].(float64); ok {
-				replySeq = int64(id)
-			} else if id, ok := seg.Data["id"].(string); ok {
-				replySeq, _ = strconv.ParseInt(id, 10, 64)
-			}
-			if replySeq != 0 {
-				elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
-			}
-		case "json":
-			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
-			}
-		case "forward":
-			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
-			}
-		case "file":
-			elements = append(elements, &message.GroupFileElement{
-				Name: getString(seg.Data["name"]),
-				Id:   getString(seg.Data["id"]),
-				Url:  getString(seg.Data["url"]),
-			})
-		}
-	}
-
-	return elements
 }
 
 func (m *Messenger) SendApi(action string, params map[string]interface{}) (interface{}, error) {

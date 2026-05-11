@@ -39,7 +39,7 @@ func TestWeiboTemplateGuestCard(t *testing.T) {
 
 	cache := NewCacheCard(flattened.GetData().GetList()[0], "guest-user", 12345)
 	msg := cache.GetMSG()
-	text := msgstringer.MsgToString(msg.Elements())
+	text := msgstringer.AdapterMsgToString(msg.Elements())
 
 	assert.Contains(t, text, "weibo-guest-user发布了新微博")
 	assert.Contains(t, text, "guest")
@@ -69,7 +69,7 @@ func TestWeiboTemplateFallback(t *testing.T) {
 
 	cache := NewCacheCard(card, "fallback-user", 54321)
 	msg := cache.GetMSG()
-	text := msgstringer.MsgToString(msg.Elements())
+	text := msgstringer.AdapterMsgToString(msg.Elements())
 
 	assert.Contains(t, text, "weibo-fallback-user发布了新微博")
 	assert.Contains(t, text, "fallback")
@@ -97,7 +97,7 @@ func TestWeiboTemplateFallbackMissingMblogId(t *testing.T) {
 
 	cache := NewCacheCard(card, "fallback-user", 665544)
 	msg := cache.GetMSG()
-	text := msgstringer.MsgToString(msg.Elements())
+	text := msgstringer.AdapterMsgToString(msg.Elements())
 
 	assert.Contains(t, text, "weibo-fallback-user发布了新微博")
 	assert.Contains(t, text, "fallback")
@@ -131,7 +131,7 @@ func TestWeiboTemplateRetweetPageInfoCover(t *testing.T) {
 
 	cache := NewCacheCard(card, "retweet-user", 112233)
 	msg := cache.GetMSG()
-	text := msgstringer.MsgToString(msg.Elements())
+	text := msgstringer.AdapterMsgToString(msg.Elements())
 
 	assert.Contains(t, text, "weibo-retweet-user转发了origin-user的微博")
 	assert.Contains(t, text, "origin")

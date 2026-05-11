@@ -3,7 +3,6 @@ module github.com/Sora233/MiraiGo-Template
 go 1.26.2
 
 replace (
-	github.com/Mrs4s/MiraiGo => ../miraigo
 	github.com/cnxysoft/DDBOT-WSa => ../
 	github.com/cnxysoft/DDBOT-WSa/adapter => ../adapter
 	github.com/cnxysoft/DDBOT-WSa/utils => ../utils
@@ -11,7 +10,6 @@ replace (
 )
 
 require (
-	github.com/Mrs4s/MiraiGo v0.0.0-20230627090859-19e3d172596e
 	github.com/cnxysoft/DDBOT-WSa v0.0.0-20250620022611-51ba1e929e90
 	github.com/cnxysoft/DDBOT-WSa/adapter v0.0.0
 	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible

@@ -9,8 +9,6 @@ import (
     "net/http"
     "strings"
     "sync"
-
-    "github.com/Mrs4s/MiraiGo/message"
     "github.com/Sora233/MiraiGo-Template/config"
     tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
     "github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
@@ -22,16 +20,6 @@ var (
 	botOnce  sync.Once
 {{ ... }}
 			sendPhoto(chatID, v)
-		case *message.VideoElement:
-			flushText(&tb)
-			sendVideo(chatID, v)
-		case *message.AtElement:
-			// best-effort textual mention
-			if v.Target == 0 {
-				tb.WriteString("@all ")
-			} else {
-				tb.WriteString("@")
-			}
 		default:
 			// ignore unsupported elements, but keep textual flow
 	}

@@ -1,7 +1,5 @@
 package adapter
 
-import "github.com/Mrs4s/MiraiGo/message"
-
 // ElementType represents the type of a message element.
 type ElementType int
 
@@ -161,9 +159,19 @@ type ForwardSegment struct {
 	ResId string
 }
 
+func (s *ForwardSegment) Type() ElementType { return ElementTypeForward }
+func (s *ForwardSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
+}
+
 // JsonSegment represents a JSON/app message element.
 type JsonSegment struct {
 	Content string
+}
+
+func (s *JsonSegment) Type() ElementType { return ElementTypeService }
+func (s *JsonSegment) ToSendingMessage() *SendingMessage {
+	return &SendingMessage{Elements: []IMessageElement{s}}
 }
 
 // MarketFaceSegment represents a market face message element.
@@ -204,115 +212,6 @@ type PrivateMessage struct {
 	Sender   *SenderInfo
 	Time     int64
 	Elements []IMessageElement
-}
-
-// endregion
-
-// region message element wrappers
-
-// MessageElementAdapter wraps a miraigo message element as an adapter IMessageElement.
-// It allows []message.IMessageElement to satisfy []adapter.IMessageElement.
-type MessageElementAdapter struct {
-	Elem message.IMessageElement
-}
-
-func (a *MessageElementAdapter) Type() ElementType {
-	switch a.Elem.(type) {
-	case *message.TextElement:
-		return ElementTypeText
-	case *message.ImageElement, *message.GroupImageElement, *message.FriendImageElement, *message.GuildImageElement:
-		return ElementTypeImage
-	case *message.FaceElement:
-		return ElementTypeFace
-	case *message.AtElement:
-		return ElementTypeAt
-	case *message.ReplyElement:
-		return ElementTypeReply
-	case *message.ServiceElement, *message.LightAppElement, *message.MusicShareElement:
-		return ElementTypeService
-	case *message.ForwardElement:
-		return ElementTypeForward
-	case *message.FileElement, *message.GroupFileElement, *message.FriendFileElement:
-		return ElementTypeFile
-	case *message.VoiceElement, *message.GroupVoiceElement, *message.RecordElement:
-		return ElementTypeVoice
-	case *message.VideoElement, *message.ShortVideoElement:
-		return ElementTypeVideo
-	case *message.RedBagElement:
-		return ElementTypeRedBag
-	case *message.DiceElement:
-		return ElementTypeDice
-	case *message.FingerGuessingElement:
-		return ElementTypeFingerGuessing
-	case *message.MarketFaceElement:
-		return ElementTypeMarketFace
-	case *message.AnimatedSticker:
-		return ElementTypeAnimatedSticker
-	default:
-		return ElementTypeText
-	}
-}
-
-func (a *MessageElementAdapter) ToSendingMessage() *SendingMessage {
-	return &SendingMessage{Elements: []IMessageElement{a}}
-}
-
-// Unwrap returns the underlying miraigo message element.
-func (a *MessageElementAdapter) Unwrap() message.IMessageElement {
-	return a.Elem
-}
-
-// AdaptElements converts []message.IMessageElement to []adapter.IMessageElement.
-func AdaptElements(elems []message.IMessageElement) []IMessageElement {
-	result := make([]IMessageElement, len(elems))
-	for i, e := range elems {
-		result[i] = &MessageElementAdapter{Elem: e}
-	}
-	return result
-}
-
-// ToMessageElements converts []adapter.IMessageElement back to []message.IMessageElement.
-// This is used at boundaries where an older interface expects []message.IMessageElement.
-func ToMessageElements(elems []IMessageElement) []message.IMessageElement {
-	result := make([]message.IMessageElement, 0, len(elems))
-	for _, e := range elems {
-		if e == nil {
-			continue
-		}
-		if a, ok := e.(*MessageElementAdapter); ok {
-			result = append(result, a.Elem)
-			continue
-		}
-		switch v := e.(type) {
-		case *TextSegment:
-			result = append(result, message.NewText(v.Content))
-		case *ImageSegment:
-			img := message.NewImage(v.File)
-			img.Url = v.Url
-			result = append(result, img)
-		case *FaceSegment:
-			result = append(result, message.NewFace(v.Index))
-		case *AtSegment:
-			result = append(result, &message.AtElement{Target: v.Target, Display: v.Display})
-		case *ReplySegment:
-			result = append(result, &message.ReplyElement{ReplySeq: v.ReplySeq, Id: v.Id, Sender: v.Sender, GroupID: v.GroupID, Time: v.Time})
-		case *VoiceSegment:
-			record := message.NewRecord(v.Url)
-			record.Name = v.Name
-			result = append(result, record)
-		case *VideoSegment:
-			video := message.NewVideo(v.Url)
-			video.Name = v.Name
-			result = append(result, video)
-		case *FileSegment:
-			file := message.NewFile(v.Url)
-			file.Name = v.Name
-			file.Path = v.Path
-			file.Url = v.Url
-			result = append(result, file)
-		}
-	}
-	return result
 }
 
 // endregion

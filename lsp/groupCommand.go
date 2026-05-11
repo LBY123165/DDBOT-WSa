@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/template"
@@ -880,13 +879,8 @@ func (lgc *LspGroupCommand) ReverseCommand() {
 }
 
 func messageReplySeq(msg adapter.IMessageElement) (int32, bool) {
-	switch e := msg.(type) {
-	case *adapter.ReplySegment:
+	if e, ok := msg.(*adapter.ReplySegment); ok {
 		return e.ReplySeq, true
-	case *adapter.MessageElementAdapter:
-		if reply, ok := e.Unwrap().(*message.ReplyElement); ok {
-			return reply.ReplySeq, true
-		}
 	}
 	return 0, false
 }

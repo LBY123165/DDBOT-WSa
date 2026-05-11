@@ -4,7 +4,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
@@ -84,10 +83,10 @@ func TestStateManager_GetMessageImageUrl(t *testing.T) {
 	assert.Len(t, sm.GetMessageImageUrl(test.G1, test.MessageID1), 3)
 
 	assert.Nil(t, sm.SaveMessageImageUrl(test.G1, test.MessageID2, []adapter.IMessageElement{
-		&adapter.MessageElementAdapter{Elem: &message.GroupImageElement{Url: "legacy-group-image"}},
-		&adapter.MessageElementAdapter{Elem: &message.FriendImageElement{Url: "legacy-friend-image"}},
+		&adapter.ImageSegment{File: "file-image", Url: "url-image"},
+		&adapter.ImageSegment{File: "file-image-only"},
 	}))
-	assert.ElementsMatch(t, []string{"legacy-group-image", "legacy-friend-image"}, sm.GetMessageImageUrl(test.G1, test.MessageID2))
+	assert.ElementsMatch(t, []string{"url-image", "file-image-only"}, sm.GetMessageImageUrl(test.G1, test.MessageID2))
 }
 
 func TestStateManager_GetCurrentMode(t *testing.T) {

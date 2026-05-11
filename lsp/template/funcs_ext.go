@@ -4,6 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/interfaces"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
+	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
+	"github.com/shopspring/decimal"
 	"math/rand"
 	"net/url"
 	"os"
@@ -14,15 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/cnxysoft/DDBOT-WSa/adapter"
-	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/interfaces"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
-	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
-	"github.com/shopspring/decimal"
 )
 
 var funcsExt = make(FuncMap)
@@ -94,19 +92,15 @@ func prefix(commandName ...string) string {
 	}
 }
 
-func reply(msg interface{}) *message.ReplyElement {
+func reply(msg interface{}) *adapter.ReplySegment {
 	if msg == nil {
 		return nil
 	}
 	switch e := msg.(type) {
-	case *message.GroupMessage:
-		return message.NewReply(e)
 	case *adapter.GroupMessage:
-		return &message.ReplyElement{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID)), GroupID: e.GroupCode, Time: int32(e.Time)}
+		return &adapter.ReplySegment{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID))}
 	case *adapter.PrivateMessage:
-		return &message.ReplyElement{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID)), Time: int32(e.Time)}
-	case *message.PrivateMessage:
-		return message.NewPrivateReply(e)
+		return &adapter.ReplySegment{ReplySeq: int32(e.ID), Id: strconv.Itoa(int(e.ID))}
 	default:
 		panic(fmt.Sprintf("unknown reply message %v", msg))
 	}
@@ -539,8 +533,6 @@ func abort(e ...interface{}) interface{} {
 			aerr.e = &adapter.TextSegment{Content: s}
 		case adapter.IMessageElement:
 			aerr.e = s
-		case message.IMessageElement:
-			aerr.e = &adapter.MessageElementAdapter{Elem: s}
 		default:
 			panic("template: abort with invalid e")
 		}
@@ -1055,9 +1047,9 @@ func loop(from, to int64) <-chan int64 {
 
 func getEleType(v interface{}) string {
 	switch v.(type) {
-	case *message.GroupImageElement, *message.FriendImageElement:
+	case *adapter.ImageSegment:
 		return "image"
-	case *message.GroupFileElement, *message.FriendFileElement:
+	case *adapter.FileSegment:
 		return "file"
 	default:
 		return "unknown"
@@ -1076,22 +1068,6 @@ func reCall(msg interface{}) bool {
 	}
 	var msgId int32
 	switch e := msg.(type) {
-	case *message.GroupMessage:
-		msgId = e.Id
-		for _, elem := range e.Elements {
-			if re, ok := elem.(*message.ReplyElement); ok {
-				msgId = re.ReplySeq
-				break
-			}
-		}
-	case *message.PrivateMessage:
-		msgId = e.Id
-		for _, elem := range e.Elements {
-			if re, ok := elem.(*message.ReplyElement); ok {
-				msgId = re.ReplySeq
-				break
-			}
-		}
 	case *adapter.GroupMessage:
 		msgId = int32(e.ID)
 		for _, elem := range e.Elements {
@@ -1120,13 +1096,8 @@ func reCall(msg interface{}) bool {
 }
 
 func adapterReplyElement(elem adapter.IMessageElement) (int32, bool) {
-	switch e := elem.(type) {
-	case *adapter.ReplySegment:
+	if e, ok := elem.(*adapter.ReplySegment); ok {
 		return e.ReplySeq, true
-	case *adapter.MessageElementAdapter:
-		if re, ok := e.Unwrap().(*message.ReplyElement); ok {
-			return re.ReplySeq, true
-		}
 	}
 	return 0, false
 }

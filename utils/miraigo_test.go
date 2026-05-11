@@ -3,56 +3,32 @@ package utils
 import (
 	"testing"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSerializationGroupMsg(t *testing.T) {
-	msg := &message.GroupMessage{
-		Id:        1,
+func TestSerializationAdapterGroupMsg(t *testing.T) {
+	msg := &adapter.GroupMessage{
+		ID:        1,
 		GroupCode: test.G1,
-		Sender: &message.Sender{
-			Uin: test.ID1,
+		Sender: &adapter.SenderInfo{
+			UserID: test.ID1,
 		},
 		Time: 30,
-		Elements: []message.IMessageElement{
-			message.NewText("qwe"),
-			message.NewText("asd"),
-			&message.GroupImageElement{ImageId: "1231we"},
-			&message.FriendImageElement{ImageId: "qwe"},
+		Elements: []adapter.IMessageElement{
+			&adapter.TextSegment{Content: "qwe"},
+			&adapter.TextSegment{Content: "asd"},
+			&adapter.ImageSegment{File: "1231we"},
+			&adapter.ImageSegment{File: "qwe"},
 		},
 	}
 
-	msgString, err := SerializationGroupMsg(msg)
+	msgString, err := SerializationAdapterGroupMsg(msg)
 	assert.Nil(t, err)
-	msg2, err := DeserializationGroupMsg(msgString)
+	msg2, err := DeserializationAdapterGroupMsg(msgString)
 	assert.Nil(t, err)
 	assert.EqualValues(t, msg, msg2)
-}
-
-func TestMessageFilter(t *testing.T) {
-	var e = []message.IMessageElement{
-		message.NewText("asd"),
-		&message.GroupImageElement{},
-		&message.ServiceElement{},
-		&message.AtElement{},
-	}
-	c := MessageFilter(e, func(element message.IMessageElement) bool {
-		return element.Type() == message.Text
-	})
-	assert.Len(t, c, 1)
-
-	c = MessageFilter(e, func(element message.IMessageElement) bool {
-		return element.Type() == message.Text || element.Type() == message.Service
-	})
-	assert.Len(t, c, 2)
-
-	c = MessageFilter(e, func(element message.IMessageElement) bool {
-		return element.Type() == message.At
-	})
-	assert.Len(t, c, 1)
 }
 
 func TestAdapterMessageFilter(t *testing.T) {

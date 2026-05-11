@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	ob11 "github.com/cnxysoft/DDBOT-WSa/adapter/onebot-v11"
 	"github.com/cnxysoft/DDBOT-WSa/adapter/satori"
@@ -138,30 +137,30 @@ func (bot *Bot) GetGroupMembersByID(groupID int64) ([]*adapter.GroupMemberInfo, 
 
 func (bot *Bot) SendGroupMessage(groupCode int64, m interface{}, newstr string) adapter.SendResp {
 	if bot.Messenger != nil {
-		sendingMsg, ok := m.(*message.SendingMessage)
+		sendingMsg, ok := m.(*adapter.SendingMessage)
 		if !ok {
 			return adapter.SendResp{
-				RetMSG: &message.GroupMessage{Id: -1},
+				RetMSG: &adapter.GroupMessage{ID: -1},
 				Error:  fmt.Errorf("invalid message type"),
 			}
 		}
 		return bot.Messenger.SendGroupMessage(groupCode, sendingMsg, newstr)
 	}
 	return adapter.SendResp{
-		RetMSG: &message.GroupMessage{Id: -1},
+		RetMSG: &adapter.GroupMessage{ID: -1},
 		Error:  fmt.Errorf("messenger not initialized"),
 	}
 }
 
-func (bot *Bot) SendPrivateMessage(target int64, m interface{}, newstr string) *message.PrivateMessage {
+func (bot *Bot) SendPrivateMessage(target int64, m interface{}, newstr string) *adapter.PrivateMessage {
 	if bot.Messenger != nil {
-		sendingMsg, ok := m.(*message.SendingMessage)
+		sendingMsg, ok := m.(*adapter.SendingMessage)
 		if !ok {
-			return &message.PrivateMessage{Id: -1}
+			return &adapter.PrivateMessage{ID: -1}
 		}
 		return bot.Messenger.SendPrivateMessage(target, sendingMsg, newstr)
 	}
-	return &message.PrivateMessage{Id: -1}
+	return &adapter.PrivateMessage{ID: -1}
 }
 
 func (bot *Bot) SendGroupForwardMessage(groupCode int64, nodes []map[string]interface{}, options *adapter.ForwardOptions) (int32, string, error) {

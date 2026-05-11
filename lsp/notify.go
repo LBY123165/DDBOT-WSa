@@ -6,7 +6,6 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
@@ -176,14 +175,8 @@ func (l *Lsp) NotifyMessage(inotify concern.Notify) *mmsg.MSG {
 }
 
 func isAtAllElement(element adapter.IMessageElement) bool {
-	switch e := element.(type) {
-	case *adapter.AtSegment:
-		return e.Target == 0
-	case *adapter.MessageElementAdapter:
-		at, ok := e.Unwrap().(*message.AtElement)
-		return ok && at.Target == 0
-	}
-	return false
+	at, ok := element.(*adapter.AtSegment)
+	return ok && at.Target == 0
 }
 
 func newAtAllMsg(m *mmsg.MSG) *mmsg.MSG {

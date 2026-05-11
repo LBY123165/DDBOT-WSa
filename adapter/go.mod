@@ -3,14 +3,12 @@ module github.com/cnxysoft/DDBOT-WSa/adapter
 go 1.26.2
 
 replace (
-	github.com/Mrs4s/MiraiGo => ../miraigo
 	github.com/Sora233/MiraiGo-Template => ../bot
 	github.com/cnxysoft/DDBOT-WSa/utils => ../utils
 	github.com/cnxysoft/DDBOT-WSa/utils/qqlog => ../utils/qqlog
 )
 
 require (
-	github.com/Mrs4s/MiraiGo v0.0.0-20230627090859-19e3d172596e
 	github.com/Sora233/MiraiGo-Template v0.0.0-20250614161613-2c6ee7380548
 	github.com/cnxysoft/DDBOT-WSa/utils/qqlog v0.0.0
 	github.com/gorilla/websocket v1.5.3
@@ -20,8 +18,6 @@ require (
 )
 
 require (
-	github.com/RomiChan/protobuf v0.1.1-0.20230204044148-2ed269a2e54d // indirect
-	github.com/RomiChan/syncx v0.0.0-20240418144900-b7402ffdebc7 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect

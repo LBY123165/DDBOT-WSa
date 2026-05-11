@@ -3,6 +3,12 @@ package telegram
 import (
 	"context"
 	"encoding/base64"
+	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
+	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/sirupsen/logrus"
+	xproxy "golang.org/x/net/proxy"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,14 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/Sora233/MiraiGo-Template/config"
-	"github.com/cnxysoft/DDBOT-WSa/adapter"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
-	"github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/sirupsen/logrus"
-	xproxy "golang.org/x/net/proxy"
 )
 
 var (
@@ -296,8 +294,6 @@ func sendToTelegram(chatID int64, sm *adapter.SendingMessage) {
 			} else {
 				tb.WriteString("@")
 			}
-		case *adapter.MessageElementAdapter:
-			appendLegacyTelegramElement(&tb, &images, &videos, v)
 		default:
 			// ignore unsupported elements
 		}
@@ -323,33 +319,6 @@ func sendToTelegram(chatID int64, sm *adapter.SendingMessage) {
 			if _, err := bot.Send(msg); err != nil {
 				log.WithError(err).WithField("chat", chatID).Warn("send text failed")
 			}
-		}
-	}
-}
-
-func appendLegacyTelegramElement(tb *strings.Builder, images *[]*adapter.ImageSegment, videos *[]*adapter.VideoSegment, elem *adapter.MessageElementAdapter) {
-	switch v := elem.Unwrap().(type) {
-	case *message.TextElement:
-		tb.WriteString(v.Content)
-	case *message.ImageElement:
-		*images = append(*images, &adapter.ImageSegment{File: v.File, Url: v.Url})
-	case *message.GroupImageElement:
-		*images = append(*images, &adapter.ImageSegment{File: v.Name, Url: v.Url})
-	case *message.FriendImageElement:
-		*images = append(*images, &adapter.ImageSegment{Url: v.Url})
-	case *message.VideoElement:
-		video := &adapter.VideoSegment{Name: v.Name, Url: v.Url}
-		if file, ok := v.File.(string); ok && file != "" {
-			video.Url = file
-		}
-		if video.Url != "" {
-			*videos = append(*videos, video)
-		}
-	case *message.AtElement:
-		if v.Target == 0 {
-			tb.WriteString("@all ")
-		} else {
-			tb.WriteString("@")
 		}
 	}
 }

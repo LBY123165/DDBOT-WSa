@@ -3,15 +3,11 @@ package lsp
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
-
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/bot"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/Sora233/sliceutil"
@@ -34,6 +30,7 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/utils/msgstringer"
 	"github.com/fsnotify/fsnotify"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/buntdb"
 	"go.uber.org/atomic"
@@ -1058,25 +1055,29 @@ func (l *Lsp) GetImageFromPool(options ...image_pool.OptionFunc) ([]image_pool.I
 }
 
 func (l *Lsp) send(msg *adapter.SendingMessage, target mmsg.Target) interface{} {
-	legacyMsg := &message.SendingMessage{Elements: adapter.ToMessageElements(msg.Elements)}
 	switch target.TargetType() {
 	case mmsg.TargetGroup:
-		return l.sendGroupMessage(target.TargetCode(), legacyMsg)
+		return l.sendGroupMessage(target.TargetCode(), msg)
 	case mmsg.TargetPrivate:
-		return l.sendPrivateMessage(target.TargetCode(), legacyMsg)
+		return l.sendPrivateMessage(target.TargetCode(), msg)
 	}
 	panic("unknown target type")
 }
 
 // SendMsg 总是返回至少一个
 func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
-	if m == nil {
+	failure := func() interface{} {
 		switch target.TargetType() {
 		case mmsg.TargetPrivate:
-			res = append(res, &message.PrivateMessage{Id: -1})
+			return &adapter.PrivateMessage{ID: -1}
 		case mmsg.TargetGroup:
-			res = append(res, &message.GroupMessage{Id: -1})
+			return &adapter.GroupMessage{ID: -1}
 		}
+		return &adapter.GroupMessage{ID: -1}
+	}
+
+	if m == nil {
+		res = append(res, failure())
 		return
 	}
 
@@ -1103,16 +1104,16 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 		case mmsg.TargetPrivate:
 			msgID, _, err := l.sendPrivateForwardMessage(target.TargetCode(), forwardNodes, forwardOptions)
 			if err != nil {
-				res = append(res, &message.PrivateMessage{Id: -1})
+				res = append(res, &adapter.PrivateMessage{ID: -1})
 			} else {
-				res = append(res, &message.PrivateMessage{Id: msgID})
+				res = append(res, &adapter.PrivateMessage{ID: int64(msgID), UserID: target.TargetCode()})
 			}
 		case mmsg.TargetGroup:
 			msgID, _, err := l.sendGroupForwardMessage(target.TargetCode(), forwardNodes, forwardOptions)
 			if err != nil {
-				res = append(res, &message.GroupMessage{Id: -1})
+				res = append(res, &adapter.GroupMessage{ID: -1})
 			} else {
-				res = append(res, &message.GroupMessage{Id: msgID})
+				res = append(res, &adapter.GroupMessage{ID: int64(msgID), GroupCode: target.TargetCode()})
 			}
 		}
 		return
@@ -1120,19 +1121,21 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 
 	msgs := m.ToMessage(target)
 	if len(msgs) == 0 {
-		switch target.TargetType() {
-		case mmsg.TargetPrivate:
-			res = append(res, &message.PrivateMessage{Id: -1})
-		case mmsg.TargetGroup:
-			res = append(res, &message.GroupMessage{Id: -1})
-		}
+		res = append(res, failure())
 		return
 	}
 	for idx, msg := range msgs {
 		r := l.send(msg, target)
 		res = append(res, r)
-		if reflect.ValueOf(r).Elem().FieldByName("Id").Int() == -1 {
-			break
+		switch v := r.(type) {
+		case *adapter.GroupMessage:
+			if v.ID == -1 {
+				return
+			}
+		case *adapter.PrivateMessage:
+			if v.ID == -1 {
+				return
+			}
 		}
 		if idx > 1 {
 			time.Sleep(time.Millisecond * 300)
@@ -1141,32 +1144,10 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 	return res
 }
 
-func (l *Lsp) GM(res []interface{}) []*message.GroupMessage {
-	var result []*message.GroupMessage
-	for _, r := range res {
-		result = append(result, r.(*message.GroupMessage))
-	}
-	return result
-}
-
 func (l *Lsp) AGM(res []interface{}) []*adapter.GroupMessage {
 	var result []*adapter.GroupMessage
 	for _, r := range res {
-		msg := r.(*message.GroupMessage)
-		adapterMsg := &adapter.GroupMessage{
-			ID:        int64(msg.Id),
-			GroupCode: msg.GroupCode,
-			Time:      int64(msg.Time),
-			Elements:  adapter.AdaptElements(msg.Elements),
-		}
-		if msg.Sender != nil {
-			adapterMsg.Sender = &adapter.SenderInfo{
-				UserID:   msg.Sender.Uin,
-				Nickname: msg.Sender.Nickname,
-				Card:     msg.Sender.CardName,
-			}
-		}
-		result = append(result, adapterMsg)
+		result = append(result, r.(*adapter.GroupMessage))
 	}
 	return result
 }
@@ -1174,106 +1155,93 @@ func (l *Lsp) AGM(res []interface{}) []*adapter.GroupMessage {
 func (l *Lsp) APM(res []interface{}) []*adapter.PrivateMessage {
 	var result []*adapter.PrivateMessage
 	for _, r := range res {
-		msg := r.(*message.PrivateMessage)
-		adapterMsg := &adapter.PrivateMessage{
-			ID:       int64(msg.Id),
-			UserID:   msg.Target,
-			Time:     int64(msg.Time),
-			Elements: adapter.AdaptElements(msg.Elements),
-		}
-		if msg.Sender != nil {
-			adapterMsg.Sender = &adapter.SenderInfo{
-				UserID:   msg.Sender.Uin,
-				Nickname: msg.Sender.Nickname,
-			}
-		}
-		result = append(result, adapterMsg)
+		result = append(result, r.(*adapter.PrivateMessage))
 	}
 	return result
 }
 
-func (l *Lsp) PM(res []interface{}) []*message.PrivateMessage {
-	var result []*message.PrivateMessage
-	for _, r := range res {
-		result = append(result, r.(*message.PrivateMessage))
-	}
-	return result
-}
-
-func (l *Lsp) sendPrivateMessage(uin int64, msg *message.SendingMessage) (res *message.PrivateMessage) {
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
-		return &message.PrivateMessage{Id: -1, Elements: msg.Elements}
-	}
+func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *adapter.PrivateMessage) {
 	if msg == nil {
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with nil private message")
-		return &message.PrivateMessage{Id: -1}
+		return &adapter.PrivateMessage{ID: -1}
 	}
-	msg.Elements = localutils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
+	if bot.Instance == nil || !bot.Instance.Online.Load() {
+		return &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
+	}
+	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
 		return element != nil
 	})
 	if len(msg.Elements) == 0 {
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with empty private message")
-		return &message.PrivateMessage{Id: -1}
+		return &adapter.PrivateMessage{ID: -1}
 	}
-	var newstring = msgstringer.MsgToString(msg.Elements)
+	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
 	res = bot.Instance.SendPrivateMessage(uin, msg, newstring)
-	if res == nil || res.Id == -1 {
-		logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+	if res == nil || res.ID == -1 {
+		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
 			WithFields(localutils.GroupLogFields(uin)).
 			Errorf("发送私聊消息失败")
 	}
 	if res == nil {
-		res = &message.PrivateMessage{Id: -1, Elements: msg.Elements}
+		res = &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
 	}
 	return res
 }
 
-// sendGroupMessage 发送一条消息，返回值总是非nil，Id为-1表示发送失败
+// sendGroupMessage 发送一条消息，返回值总是非nil，ID为-1表示发送失败
 // miraigo偶尔发送消息会panic？！
-func (l *Lsp) sendGroupMessage(groupCode int64, msg *message.SendingMessage, recovered ...bool) (res *message.GroupMessage) {
+func (l *Lsp) sendGroupMessage(groupCode int64, msg *adapter.SendingMessage, recovered ...bool) (res *adapter.GroupMessage) {
 	defer func() {
 		if e := recover(); e != nil {
+			content := ""
+			if msg != nil {
+				content = msgstringer.AdapterMsgToString(msg.Elements)
+			}
 			if len(recovered) == 0 {
-				logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+				logger.WithField("content", content).
 					WithField("stack", string(debug.Stack())).
 					Errorf("sendGroupMessage panic recovered")
 				res = l.sendGroupMessage(groupCode, msg, true)
 			} else {
-				logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+				logger.WithField("content", content).
 					WithField("stack", string(debug.Stack())).
 					Errorf("sendGroupMessage panic recovered but panic again %v", e)
-				res = &message.GroupMessage{Id: -1, Elements: msg.Elements}
+				elements := []adapter.IMessageElement(nil)
+				if msg != nil {
+					elements = msg.Elements
+				}
+				res = &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: elements}
 			}
 		}
 	}()
-	if bot.Instance == nil {
-		return &message.GroupMessage{Id: -1, Elements: msg.Elements}
-	}
-	if l.LspStateManager.IsMuted(groupCode, bot.Instance.Uin) &&
-		!l.PermissionStateManager.CheckGroupAdministrator(groupCode, bot.Instance.Uin) {
-		logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
-			WithFields(localutils.GroupLogFields(groupCode)).
-			Debug("BOT被禁言无法发送群消息")
-		return &message.GroupMessage{Id: -1, Elements: msg.Elements}
-	}
 	if msg == nil {
 		logger.Debug("消息为空，返回")
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("send with nil group message")
-		return &message.GroupMessage{Id: -1}
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode}
 	}
-	msg.Elements = localutils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
+	if bot.Instance == nil {
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
+	}
+	if l.LspStateManager.IsMuted(groupCode, bot.Instance.Uin) &&
+		!l.PermissionStateManager.CheckGroupAdministrator(groupCode, bot.Instance.Uin) {
+		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
+			WithFields(localutils.GroupLogFields(groupCode)).
+			Debug("BOT被禁言无法发送群消息")
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
+	}
+	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
 		return element != nil
 	})
 	if len(msg.Elements) == 0 {
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("send with empty group message")
-		return &message.GroupMessage{Id: -1}
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode}
 	}
-	var newstring = msgstringer.MsgToString(msg.Elements)
+	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
 	ret := bot.Instance.SendGroupMessage(groupCode, msg, newstring)
 	res = ret.RetMSG
 	err := ret.Error
 	if err != nil {
-		msgStr := msgstringer.MsgToString(msg.Elements)
+		msgStr := msgstringer.AdapterMsgToString(msg.Elements)
 		if len(msgStr) > 150 {
 			msgStr = msgStr[:150] + "..."
 		}
@@ -1283,7 +1251,7 @@ func (l *Lsp) sendGroupMessage(groupCode int64, msg *message.SendingMessage, rec
 	}
 	if res == nil {
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("failed to send message")
-		res = &message.GroupMessage{Id: -1, Elements: msg.Elements}
+		res = &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
 	}
 	return res
 }

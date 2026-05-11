@@ -4,16 +4,9 @@ import (
 	"encoding/base64"
 	"errors"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/samber/lo"
 )
-
-func MessageFilter(msg []message.IMessageElement, filter func(message.IMessageElement) bool) []message.IMessageElement {
-	return lo.Filter(msg, func(e message.IMessageElement, _ int) bool {
-		return filter(e)
-	})
-}
 
 func AdapterMessageFilter(msg []adapter.IMessageElement, filter func(adapter.IMessageElement) bool) []adapter.IMessageElement {
 	return lo.Filter(msg, func(e adapter.IMessageElement, _ int) bool {
@@ -62,61 +55,12 @@ func UploadPrivateImage(uin int64, img []byte, isNorm bool) (*adapter.ImageSegme
 	}, nil
 }
 
-const (
-	internalMsgTypeGroup = "group"
-)
+const internalMsgTypeGroup = "group"
 
 type internalMsg struct {
 	Type          string `json:"type"`
 	MsgInfo       string `json:"msg_info"`
 	ElementString string `json:"element_string"`
-}
-
-func SerializationGroupMsg(m *message.GroupMessage) (string, error) {
-	elems := m.Elements
-	m.Elements = nil
-
-	defer func() {
-		m.Elements = elems
-	}()
-
-	mString, err := json.MarshalToString(m)
-	if err != nil {
-		return "", err
-	}
-
-	elemString, err := SerializationElement(elems)
-	if err != nil {
-		return "", err
-	}
-
-	imsg := &internalMsg{
-		Type:          internalMsgTypeGroup,
-		MsgInfo:       mString,
-		ElementString: elemString,
-	}
-
-	return json.MarshalToString(imsg)
-}
-
-func DeserializationGroupMsg(r string) (*message.GroupMessage, error) {
-	var imsg *internalMsg
-	err := json.UnmarshalFromString(r, &imsg)
-	if err != nil {
-		return nil, err
-	}
-
-	var m *message.GroupMessage
-	err = json.UnmarshalFromString(imsg.MsgInfo, &m)
-	if err != nil {
-		return nil, err
-	}
-	elems, err := DeserializationElement(imsg.ElementString)
-	if err != nil {
-		return nil, err
-	}
-	m.Elements = elems
-	return m, nil
 }
 
 func SerializationAdapterGroupMsg(m *adapter.GroupMessage) (string, error) {
@@ -172,10 +116,8 @@ type internalElem struct {
 }
 
 const (
-	internalTypeText        = "text"
-	internalTypeGroupImage  = "group_image"
-	internalTypeFriendImage = "friend_image"
-	internalTypeImage       = "image"
+	internalTypeText  = "text"
+	internalTypeImage = "image"
 )
 
 func SerializationAdapterElement(e []adapter.IMessageElement) (string, error) {
@@ -195,23 +137,6 @@ func SerializationAdapterElement(e []adapter.IMessageElement) (string, error) {
 				Type:    internalTypeImage,
 				Content: string(b),
 			})
-		case *adapter.MessageElementAdapter:
-			switch legacy := o.Elem.(type) {
-			case *message.TextElement:
-				b, _ := json.Marshal(legacy)
-				tmp = append(tmp, &internalElem{Type: internalTypeText, Content: string(b)})
-			case *message.GroupImageElement:
-				b, _ := json.Marshal(legacy)
-				tmp = append(tmp, &internalElem{Type: internalTypeGroupImage, Content: string(b)})
-			case *message.FriendImageElement:
-				b, _ := json.Marshal(legacy)
-				tmp = append(tmp, &internalElem{Type: internalTypeFriendImage, Content: string(b)})
-			case *message.ImageElement:
-				b, _ := json.Marshal(legacy)
-				tmp = append(tmp, &internalElem{Type: internalTypeImage, Content: string(b)})
-			default:
-				panic("unsupported element type")
-			}
 		default:
 			panic("unsupported element type")
 		}
@@ -236,97 +161,6 @@ func DeserializationAdapterElement(r string) ([]adapter.IMessageElement, error) 
 			}
 		case internalTypeImage:
 			var elem *adapter.ImageSegment
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, elem)
-			}
-		case internalTypeGroupImage:
-			var elem *message.GroupImageElement
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, &adapter.MessageElementAdapter{Elem: elem})
-			}
-		case internalTypeFriendImage:
-			var elem *message.FriendImageElement
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, &adapter.MessageElementAdapter{Elem: elem})
-			}
-		default:
-			panic("unsupported element type")
-		}
-	}
-	return result, nil
-}
-
-// SerializationElement 序列化消息，只支持图片，文字
-func SerializationElement(e []message.IMessageElement) (string, error) {
-	var tmp []*internalElem
-
-	for _, elem := range e {
-		switch o := elem.(type) {
-		case *message.TextElement:
-			b, _ := json.Marshal(o)
-			tmp = append(tmp, &internalElem{
-				Type:    internalTypeText,
-				Content: string(b),
-			})
-		case *message.GroupImageElement:
-			b, _ := json.Marshal(o)
-			tmp = append(tmp, &internalElem{
-				Type:    internalTypeGroupImage,
-				Content: string(b),
-			})
-		case *message.FriendImageElement:
-			b, _ := json.Marshal(o)
-			tmp = append(tmp, &internalElem{
-				Type:    internalTypeFriendImage,
-				Content: string(b),
-			})
-		case *message.ImageElement:
-			b, _ := json.Marshal(o)
-			tmp = append(tmp, &internalElem{
-				Type:    internalTypeImage,
-				Content: string(b),
-			})
-		default:
-			panic("unsupported element type")
-		}
-	}
-	s, err := json.MarshalToString(tmp)
-	return s, err
-}
-
-// DeserializationElement 反序列化消息，只支持图片，文字
-func DeserializationElement(r string) ([]message.IMessageElement, error) {
-	var tmp []*internalElem
-	err := json.Unmarshal([]byte(r), &tmp)
-	if err != nil {
-		return nil, err
-	}
-	var result []message.IMessageElement
-	for _, e := range tmp {
-		switch e.Type {
-		case internalTypeGroupImage:
-			var elem *message.GroupImageElement
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, elem)
-			}
-		case internalTypeText:
-			var elem *message.TextElement
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, elem)
-			}
-		case internalTypeFriendImage:
-			var elem *message.FriendImageElement
-			json.UnmarshalFromString(e.Content, &elem)
-			if elem != nil {
-				result = append(result, elem)
-			}
-		case internalTypeImage:
-			var elem *message.ImageElement
 			json.UnmarshalFromString(e.Content, &elem)
 			if elem != nil {
 				result = append(result, elem)

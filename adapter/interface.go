@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/Mrs4s/MiraiGo/message"
 )
 
 type MessageType string
@@ -387,11 +385,11 @@ func ConvertToMessageElements(segments []MessageSegment) []IMessageElement {
 			}
 		case "json":
 			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &MessageElementAdapter{Elem: &message.LightAppElement{Content: data}})
+				elements = append(elements, &JsonSegment{Content: data})
 			}
 		case "forward":
 			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &MessageElementAdapter{Elem: &message.ForwardElement{ResId: id}})
+				elements = append(elements, &ForwardSegment{ResId: id})
 			}
 		case "file":
 			elements = append(elements, &FileSegment{

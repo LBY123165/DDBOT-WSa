@@ -4,8 +4,6 @@ go 1.26.2
 
 replace github.com/Sora233/MiraiGo-Template => ./bot
 
-replace github.com/Mrs4s/MiraiGo => ./miraigo
-
 replace github.com/cnxysoft/DDBOT-WSa/lsp/eventbus => ./lsp/eventbus
 
 replace github.com/cnxysoft/DDBOT-WSa/adapter => ./adapter
@@ -18,7 +16,6 @@ replace github.com/cnxysoft/DDBOT-WSa/utils/qqlog => ./utils/qqlog
 
 require (
 	github.com/Jeffail/gabs/v2 v2.7.0
-	github.com/Mrs4s/MiraiGo v0.0.0-20230627090859-19e3d172596e
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/Sora233/MiraiGo-Template v0.0.0-20250614161613-2c6ee7380548
 	github.com/Sora233/sliceutil v0.0.0-20210120043858-459badd8d882

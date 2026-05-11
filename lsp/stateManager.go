@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/tidwall/buntdb"
@@ -53,19 +52,11 @@ func (s *StateManager) SaveMessageImageUrl(groupCode int64, messageID int32, msg
 }
 
 func messageImageURL(msg adapter.IMessageElement) string {
-	switch e := msg.(type) {
-	case *adapter.ImageSegment:
+	if e, ok := msg.(*adapter.ImageSegment); ok {
 		if e.Url != "" {
 			return e.Url
 		}
 		return e.File
-	case *adapter.MessageElementAdapter:
-		switch elem := e.Unwrap().(type) {
-		case *message.GroupImageElement:
-			return elem.Url
-		case *message.FriendImageElement:
-			return elem.Url
-		}
 	}
 	return ""
 }
