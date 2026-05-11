@@ -24,8 +24,6 @@ const (
 )
 
 // IMessageElement is the core message element interface.
-// It is implemented by both adapter-native segment types and miraigo/message types
-// (via miraigo/message/compat.go).
 type IMessageElement interface {
 	Type() ElementType
 	ToSendingMessage() *SendingMessage

@@ -64,5 +64,5 @@ func TestUploadGroupImage(t *testing.T) {
 }
 
 func TestUploadPrivateImage(t *testing.T) {
-	t.Skip("Skipped in adapter mode - requires Miraigo bot connection")
+	t.Skip("Skipped in adapter mode - requires bot connection")
 }

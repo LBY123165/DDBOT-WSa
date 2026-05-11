@@ -28,10 +28,9 @@ func (f *ForwardElement) ToSendingMessage() *adapter.SendingMessage {
 }
 
 // PackToElement 实现 CustomElement 接口
-// 由于 onebot-v11 的转发消息不走 MiraiGo 的转发协议，这里返回 nil
 // 实际转发消息通过 SendGroupForwardMessage / SendPrivateForwardMessage API 发送
 func (f *ForwardElement) PackToElement(target Target) adapter.IMessageElement {
-	return nil // 不通过 MiraiGo 原生协议发送
+	return nil
 }
 
 // NewForwardElement 创建一个转发消息元素
