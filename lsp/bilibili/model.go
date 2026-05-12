@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/template"
@@ -443,7 +443,7 @@ type CacheCard struct {
 	msgCache   *mmsg.MSG
 	dynamic    DynamicInfo
 	dynamicRaw map[string]interface{}
-	orgMsg     *message.GroupMessage
+	orgMsg     *adapter.GroupMessage
 }
 
 func NewCacheCard(card *Card) *CacheCard {
@@ -618,12 +618,12 @@ type DynamicDetail struct {
 		Desc1   string `json:"desc1"`
 		Desc2   string `json:"desc2"`
 		Desc3   string `json:"desc3"`
-		SType   int    `json:"stype"`   // 1=视频预约, 2=直播预约
+		SType   int    `json:"stype"` // 1=视频预约, 2=直播预约
 		JumpUrl string `json:"jump_url"`
-		State   int    `json:"state"`   // 0=进行中, 1=直播中/已发布, 2=已结束
+		State   int    `json:"state"` // 0=进行中, 1=直播中/已发布, 2=已结束
 	} `json:"reserve,omitempty"`
 	Vote *VoteInfo `json:"vote,omitempty"`
-	PGC struct {
+	PGC  struct {
 		Type     string `json:"type"`
 		Title    string `json:"title"`
 		CoverUrl string `json:"cover_url"`
@@ -665,14 +665,33 @@ type DynamicDetail struct {
 	Emojis []Emoji `json:"emojis,omitempty"`
 	// desc.rich_text_nodes 中 VIEW_PICTURE 节点的图片
 	DescViewPictures []DescViewPictures `json:"desc_view_pictures,omitempty"`
+	// desc.rich_text_nodes 中链接节点的引用（CV/BV/WEB 类型）
+	CVCards []CVCard `json:"cv_cards,omitempty"`
+}
+
+// CVCard desc.rich_text_nodes 中链接节点的引用信息（CV/BV/WEB 类型）
+type CVCard struct {
+	LinkType string `json:"link_type"` // 链接类型：RICH_TEXT_NODE_TYPE_CV, RICH_TEXT_NODE_TYPE_BV, RICH_TEXT_NODE_TYPE_WEB
+	JumpUrl  string `json:"jump_url"`  // 跳转链接
+	OrigText string `json:"orig_text"` // 原始文本
+	Rid      string `json:"rid"`       // 资源 ID（CV 为专栏 ID，BV 为视频 BV 号，WEB 可能为空）
+	Text     string `json:"text"`      // 显示文本
+	// Style 仅 WEB 类型有
+	Style *RichTextLinkStyle `json:"style,omitempty"`
+}
+
+// RichTextLinkStyle 链接样式（仅 WEB 类型使用）
+type RichTextLinkStyle struct {
+	FontLevel string `json:"font_level"` // 字体级别
+	FontSize  int    `json:"font_size"`  // 字体大小
 }
 
 // DescViewPictures desc.rich_text_nodes 中 VIEW_PICTURE 节点的图片信息
 type DescViewPictures struct {
-	JumpUrl string     `json:"jump_url"`
-	Rid     string     `json:"rid"`
-	Text    string     `json:"text"`
-	Pics    []PicInfo  `json:"pics"`
+	JumpUrl string    `json:"jump_url"`
+	Rid     string    `json:"rid"`
+	Text    string    `json:"text"`
+	Pics    []PicInfo `json:"pics"`
 }
 
 // PicInfo VIEW_PICTURE 节点中的单张图片信息
@@ -695,14 +714,14 @@ type Emoji struct {
 
 // VoteInfo 投票信息
 type VoteInfo struct {
-	VoteId    int64       `json:"vote_id"`
-	Title     string      `json:"title"`
-	Desc      string      `json:"desc"`
-	JoinNum   int         `json:"join_num"`
-	ChoiceCnt int         `json:"choice_cnt"`
-	EndTime   int64       `json:"end_time"`
-	Status    int         `json:"status"`
-	Button    VoteButton  `json:"button"`
+	VoteId    int64      `json:"vote_id"`
+	Title     string     `json:"title"`
+	Desc      string     `json:"desc"`
+	JoinNum   int        `json:"join_num"`
+	ChoiceCnt int        `json:"choice_cnt"`
+	EndTime   int64      `json:"end_time"`
+	Status    int        `json:"status"`
+	Button    VoteButton `json:"button"`
 }
 
 // VoteButton 投票按钮
@@ -1195,7 +1214,6 @@ func (c *CacheCard) GetMSG() *mmsg.MSG {
 		if err != nil {
 			logger.Errorf("bilibili: NewsInfo LoadAndExec error %v", err)
 		}
-		return
 	})
 	return c.msgCache
 }
@@ -1378,6 +1396,53 @@ func parseViewPicturesFromRichTextNodes(richTextNodes []interface{}) []DescViewP
 	return viewPictures
 }
 
+// parseCVCardsFromRichTextNodes 解析 rich_text_nodes 中的链接节点（CV/BV/WEB 类型）
+func parseCVCardsFromRichTextNodes(richTextNodes []interface{}) []CVCard {
+	var cvCards []CVCard
+	for _, node := range richTextNodes {
+		nodeMap, ok := node.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		nodeType, ok := nodeMap["type"].(string)
+		if !ok {
+			continue
+		}
+		// 仅处理 CV、BV、WEB 类型
+		if nodeType != "RICH_TEXT_NODE_TYPE_CV" &&
+			nodeType != "RICH_TEXT_NODE_TYPE_BV" &&
+			nodeType != "RICH_TEXT_NODE_TYPE_WEB" {
+			continue
+		}
+		var cv CVCard
+		cv.LinkType = nodeType
+		if jumpUrl, ok := nodeMap["jump_url"].(string); ok {
+			cv.JumpUrl = jumpUrl
+		}
+		if origText, ok := nodeMap["orig_text"].(string); ok {
+			cv.OrigText = origText
+		}
+		if rid, ok := nodeMap["rid"].(string); ok {
+			cv.Rid = rid
+		}
+		if text, ok := nodeMap["text"].(string); ok {
+			cv.Text = text
+		}
+		// 解析 style（仅 WEB 类型有）
+		if style, ok := nodeMap["style"].(map[string]interface{}); ok {
+			cv.Style = &RichTextLinkStyle{}
+			if fontLevel, ok := style["font_level"].(string); ok {
+				cv.Style.FontLevel = fontLevel
+			}
+			if fontSize, ok := style["font_size"].(float64); ok {
+				cv.Style.FontSize = int(fontSize)
+			}
+		}
+		cvCards = append(cvCards, cv)
+	}
+	return cvCards
+}
+
 func getDescContent(resp map[string]interface{}, repost bool) (result DynamicDetail) {
 	code, ok := resp["code"].(float64)
 	if !ok || code != 0 {
@@ -1481,6 +1546,7 @@ func getDescContent(resp map[string]interface{}, repost bool) (result DynamicDet
 			if richTextNodes, ok := desc["rich_text_nodes"].([]interface{}); ok {
 				res.Emojis = append(res.Emojis, parseEmojisFromRichTextNodes(richTextNodes)...)
 				res.DescViewPictures = append(res.DescViewPictures, parseViewPicturesFromRichTextNodes(richTextNodes)...)
+				res.CVCards = append(res.CVCards, parseCVCardsFromRichTextNodes(richTextNodes)...)
 			}
 		}
 
@@ -1495,6 +1561,7 @@ func getDescContent(resp map[string]interface{}, repost bool) (result DynamicDet
 					// 解析表情包
 					if richTextNodes, ok := summary["rich_text_nodes"].([]interface{}); ok {
 						res.Emojis = append(res.Emojis, parseEmojisFromRichTextNodes(richTextNodes)...)
+						res.CVCards = append(res.CVCards, parseCVCardsFromRichTextNodes(richTextNodes)...)
 					}
 				}
 			}

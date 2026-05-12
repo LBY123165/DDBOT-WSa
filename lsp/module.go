@@ -3,16 +3,11 @@ package lsp
 import (
 	"fmt"
 	"os"
-	"reflect"
 	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/robfig/cron/v3"
-
-	"github.com/Mrs4s/MiraiGo/client"
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/bot"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/Sora233/sliceutil"
@@ -35,6 +30,7 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/utils/msgstringer"
 	"github.com/fsnotify/fsnotify"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/robfig/cron/v3"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/buntdb"
 	"go.uber.org/atomic"
@@ -250,7 +246,7 @@ func (l *Lsp) DebugCheck(groupCode int64, uin int64, isGroupMessage bool) bool {
 
 func (l *Lsp) Serve(bot *bot.Bot) {
 	logger.Debugf("Lsp.Serve called: bot=%p, GroupMessageEvent=%p", bot, bot.GroupMessageEvent)
-	bot.GroupMemberJoinEvent.Subscribe(func(qqClient *client.QQClient, event *client.MemberJoinGroupEvent) {
+	bot.GroupMemberJoinEvent.Subscribe(func(event *adapter.MemberJoinGroupEvent) {
 		if err := localdb.Set(localdb.Key("OnGroupMemberJoined", event.Group.Code, event.Member.Uin, event.Member.JoinTime), "",
 			localdb.SetExpireOpt(time.Minute*2), localdb.SetNoOverWriteOpt()); err != nil {
 			return
@@ -273,7 +269,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 			l.SendMsg(m, mmsg.NewGroupTarget(event.Group.Code))
 		}
 	})
-	bot.GroupMemberLeaveEvent.Subscribe(func(qqClient *client.QQClient, event *client.MemberLeaveGroupEvent) {
+	bot.GroupMemberLeaveEvent.Subscribe(func(event *adapter.MemberLeaveGroupEvent) {
 		if err := localdb.Set(localdb.Key("OnGroupMemberLeaved", event.Group.Code, event.Member.Uin, event.Member.JoinTime), "",
 			localdb.SetExpireOpt(time.Minute*2), localdb.SetNoOverWriteOpt()); err != nil {
 			return
@@ -297,7 +293,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMessageRecalledEvent) {
+	bot.GroupMessageRecalledEvent.Subscribe(func(event *adapter.GroupMessageRecalledEvent) {
 		data := map[string]interface{}{
 			"group_code":   event.GroupCode,
 			"author_uin":   event.AuthorUin,
@@ -319,7 +315,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupInvitedEvent.Subscribe(func(qqClient *client.QQClient, request *client.GroupInvitedRequest) {
+	bot.GroupInvitedEvent.Subscribe(func(request *adapter.GroupInvitedRequest) {
 		log := logger.WithFields(logrus.Fields{
 			"GroupCode":   request.GroupCode,
 			"GroupName":   request.GroupName,
@@ -400,7 +396,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.NewFriendRequestEvent.Subscribe(func(qqClient *client.QQClient, request *client.NewFriendRequest) {
+	bot.NewFriendRequestEvent.Subscribe(func(request *adapter.NewFriendRequest) {
 		log := logger.WithFields(logrus.Fields{
 			"RequesterUin":  request.RequesterUin,
 			"RequesterNick": request.RequesterNick,
@@ -459,7 +455,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.NewFriendEvent.Subscribe(func(qqClient *client.QQClient, event *client.NewFriendEvent) {
+	bot.NewFriendEvent.Subscribe(func(event *adapter.NewFriendEvent) {
 		log := logger.WithFields(logrus.Fields{
 			"Uin":      event.Friend.Uin,
 			"Nickname": event.Friend.Nickname,
@@ -490,7 +486,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupJoinEvent.Subscribe(func(qqClient *client.QQClient, info *client.GroupInfo) {
+	bot.GroupJoinEvent.Subscribe(func(info *adapter.GroupInfo) {
 		l.FreshIndex()
 		log := logger.WithFields(logrus.Fields{
 			"GroupCode":   info.Code,
@@ -533,7 +529,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		})
 	})
 
-	bot.GroupLeaveEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupLeaveEvent) {
+	bot.GroupLeaveEvent.Subscribe(func(event *adapter.GroupLeaveEvent) {
 		log := logger.WithField("GroupCode", event.Group.Code).
 			WithField("GroupName", event.Group.Name).
 			WithField("MemberCount", event.Group.MemberCount)
@@ -556,9 +552,9 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		l.RemoveAllByGroup(event.Group.Code)
 	})
 
-	bot.GroupNotifyEvent.Subscribe(func(qqClient *client.QQClient, ievent client.INotifyEvent) {
+	bot.GroupNotifyEvent.Subscribe(func(ievent adapter.NotifyEvent) {
 		switch event := ievent.(type) {
-		case *client.GroupPokeNotifyEvent:
+		case *adapter.GroupPokeNotifyEvent:
 			data := map[string]interface{}{
 				"member_code":   event.Sender,
 				"receiver_code": event.Receiver,
@@ -580,9 +576,9 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.FriendNotifyEvent.Subscribe(func(qqClient *client.QQClient, ievent client.INotifyEvent) {
+	bot.FriendNotifyEvent.Subscribe(func(ievent adapter.NotifyEvent) {
 		switch event := ievent.(type) {
-		case *client.FriendPokeNotifyEvent:
+		case *adapter.FriendPokeNotifyEvent:
 			if event.Receiver == localutils.GetBot().GetUin() {
 				data := map[string]interface{}{
 					"member_code": event.Sender,
@@ -598,11 +594,11 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupMessageEvent.Subscribe(func(qqClient *client.QQClient, msg *message.GroupMessage) {
+	bot.GroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, msg.Id, msg.Elements); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), msg.Elements); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 		if !l.started.Load() {
@@ -621,16 +617,16 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.SelfGroupMessageEvent.Subscribe(func(qqClient *client.QQClient, msg *message.GroupMessage) {
+	bot.SelfGroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
 		if len(msg.Elements) <= 0 {
 			return
 		}
-		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, msg.Id, msg.Elements); err != nil {
+		if err := l.LspStateManager.SaveMessageImageUrl(msg.GroupCode, int32(msg.ID), msg.Elements); err != nil {
 			logger.Errorf("SaveMessageImageUrl failed %v", err)
 		}
 	})
 
-	bot.GroupMuteEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMuteEvent) {
+	bot.GroupMuteEvent.Subscribe(func(event *adapter.GroupMuteEvent) {
 		if err := l.LspStateManager.Muted(event.GroupCode, event.TargetUin, event.Time); err != nil {
 			logger.Errorf("Muted failed %v", err)
 		}
@@ -657,7 +653,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.PrivateMessageEvent.Subscribe(func(qqClient *client.QQClient, msg *message.PrivateMessage) {
+	bot.PrivateMessageEvent.Subscribe(func(msg *adapter.PrivateMessage) {
 		if !l.started.Load() {
 			return
 		}
@@ -670,7 +666,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 		go cmd.Execute()
 	})
-	bot.FriendMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.FriendMessageRecalledEvent) {
+	bot.FriendMessageRecalledEvent.Subscribe(func(event *adapter.FriendMessageRecalledEvent) {
 		friendName := "未知好友"
 		if fi := localutils.GetBot().FindFriend(event.FriendUin); fi != nil {
 			friendName = fi.Nickname
@@ -684,17 +680,14 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 			l.SendMsg(m, mmsg.NewPrivateTarget(event.FriendUin))
 		}
 	})
-	bot.DisconnectedEvent.Subscribe(func(qqClient *client.QQClient, event *client.ClientDisconnectedEvent) {
+	bot.DisconnectedEvent.Subscribe(func(event *adapter.ClientDisconnectedEvent) {
 		logger.Errorf("收到OnDisconnected事件 %v", event.Message)
 		if config.GlobalConfig.GetString("bot.onDisconnected") == "exit" {
 			logger.Fatalf("onDisconnected设置为exit，bot将自动退出")
 		}
-		if err := bot.ReLogin(event); err != nil {
-			logger.Fatalf("重连时发生错误%v，bot将自动退出", err)
-		}
 	})
 
-	bot.MemberCardUpdatedEvent.Subscribe(func(qqClient *client.QQClient, event *client.MemberCardUpdatedEvent) {
+	bot.MemberCardUpdatedEvent.Subscribe(func(event *adapter.MemberCardUpdatedEvent) {
 		groupName := event.Group.Name
 		memberName := event.Member.DisplayName()
 		if gi := localutils.GetBot().FindGroup(event.Group.Code); gi != nil {
@@ -719,7 +712,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupUploadNotifyEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupUploadNotifyEvent) {
+	bot.GroupUploadNotifyEvent.Subscribe(func(event *adapter.GroupUploadNotifyEvent) {
 		data := map[string]interface{}{
 			"member_code": event.Sender,
 			"group_code":  event.GroupCode,
@@ -741,7 +734,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupMemberPermissionChangedEvent.Subscribe(func(qqClient *client.QQClient, event *client.MemberPermissionChangedEvent) {
+	bot.GroupMemberPermissionChangedEvent.Subscribe(func(event *adapter.MemberPermissionChangedEvent) {
 		groupName := event.Group.Name
 		memberName := event.Member.DisplayName()
 		if gi := localutils.GetBot().FindGroup(event.Group.Code); gi != nil {
@@ -756,13 +749,13 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 			"member_code": event.Member.Uin,
 			"member_name": memberName,
 		}
-		permission := func(permission client.MemberPermission) string {
+		permission := func(permission adapter.MemberPermission) string {
 			switch permission {
-			case client.Member:
+			case adapter.Member:
 				return "群员"
-			case client.Administrator:
+			case adapter.Administrator:
 				return "管理员"
-			case client.Owner:
+			case adapter.Owner:
 				return "群主"
 			}
 			return "未知权限"
@@ -774,7 +767,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 			l.SendMsg(m, mmsg.NewGroupTarget(event.Group.Code))
 		}
 	})
-	bot.MemberSpecialTitleUpdatedEvent.Subscribe(func(qqClient *client.QQClient, event *client.MemberSpecialTitleUpdatedEvent) {
+	bot.MemberSpecialTitleUpdatedEvent.Subscribe(func(event *adapter.MemberSpecialTitleUpdatedEvent) {
 		groupName := ""
 		memberName := ""
 		if gi := localutils.GetBot().FindGroup(event.GroupCode); gi != nil {
@@ -796,7 +789,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupEssenceChangedEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupDigestEvent) {
+	bot.GroupEssenceChangedEvent.Subscribe(func(event *adapter.GroupDigestEvent) {
 		data := map[string]interface{}{
 			"group_code": event.GroupCode,
 		}
@@ -809,7 +802,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupDisbandEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupDisbandEvent) {
+	bot.GroupDisbandEvent.Subscribe(func(event *adapter.GroupDisbandEvent) {
 		data := map[string]interface{}{
 			"group_code": event.Group.Code,
 		}
@@ -831,7 +824,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.GroupMsgEmojiLikeEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMsgEmojiLikeEvent) {
+	bot.GroupMsgEmojiLikeEvent.Subscribe(func(event *adapter.GroupMsgEmojiLikeEvent) {
 		memberName := ""
 		if gi := localutils.GetBot().FindGroup(event.GroupCode); gi != nil {
 			if fi := gi.FindMember(event.UserId); fi != nil {
@@ -853,7 +846,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.ProfileLikeEvent.Subscribe(func(qqClient *client.QQClient, event *client.ProfileLikeEvent) {
+	bot.ProfileLikeEvent.Subscribe(func(event *adapter.ProfileLikeEvent) {
 		data := map[string]interface{}{
 			"operator_id":   event.OperatorId,
 			"operator_nick": event.OperatorNick,
@@ -865,7 +858,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.PokeRecallEvent.Subscribe(func(qqClient *client.QQClient, event *client.PokeRecallEvent) {
+	bot.PokeRecallEvent.Subscribe(func(event *adapter.PokeRecallEvent) {
 		data := map[string]interface{}{
 			"member_code":   event.Sender,
 			"receiver_code": event.Receiver,
@@ -886,7 +879,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		}
 	})
 
-	bot.BotOnlineEvent.Subscribe(func(qqClient *client.QQClient, event *client.BotOnlineEvent) {
+	bot.BotOnlineEvent.Subscribe(func(event *adapter.BotOnlineEvent) {
 		templateName := "notify.bot.online.tmpl"
 		data := map[string]interface{}{
 			"template_name": templateName,
@@ -895,7 +888,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		_, _ = template.LoadAndExec(templateName, data)
 	})
 
-	bot.BotOfflineEvent.Subscribe(func(qqClient *client.QQClient, event *client.BotOfflineEvent) {
+	bot.BotOfflineEvent.Subscribe(func(event *adapter.BotOfflineEvent) {
 		templateName := "notify.bot.offline.tmpl"
 		data := map[string]interface{}{
 			"template_name": templateName,
@@ -904,7 +897,7 @@ func (l *Lsp) Serve(bot *bot.Bot) {
 		_, _ = template.LoadAndExec(templateName, data)
 	})
 
-	bot.BotSendFailedEvent.Subscribe(func(qqClient *client.QQClient, event *client.BotSendFailedEvent) {
+	bot.BotSendFailedEvent.Subscribe(func(event *adapter.BotSendFailedEvent) {
 		logger.Debugf("消息已 %d 次发送失败，尝试触发提醒模板", event.Times)
 		templateName := "notify.bot.send_failed.tmpl"
 		data := map[string]interface{}{
@@ -1058,7 +1051,7 @@ func (l *Lsp) GetImageFromPool(options ...image_pool.OptionFunc) ([]image_pool.I
 	return l.pool.Get(options...)
 }
 
-func (l *Lsp) send(msg *message.SendingMessage, target mmsg.Target) interface{} {
+func (l *Lsp) send(msg *adapter.SendingMessage, target mmsg.Target) interface{} {
 	switch target.TargetType() {
 	case mmsg.TargetGroup:
 		return l.sendGroupMessage(target.TargetCode(), msg)
@@ -1070,13 +1063,18 @@ func (l *Lsp) send(msg *message.SendingMessage, target mmsg.Target) interface{} 
 
 // SendMsg 总是返回至少一个
 func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
-	if m == nil {
+	failure := func() interface{} {
 		switch target.TargetType() {
 		case mmsg.TargetPrivate:
-			res = append(res, &message.PrivateMessage{Id: -1})
+			return &adapter.PrivateMessage{ID: -1}
 		case mmsg.TargetGroup:
-			res = append(res, &message.GroupMessage{Id: -1})
+			return &adapter.GroupMessage{ID: -1}
 		}
+		return &adapter.GroupMessage{ID: -1}
+	}
+
+	if m == nil {
+		res = append(res, failure())
 		return
 	}
 
@@ -1103,16 +1101,16 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 		case mmsg.TargetPrivate:
 			msgID, _, err := l.sendPrivateForwardMessage(target.TargetCode(), forwardNodes, forwardOptions)
 			if err != nil {
-				res = append(res, &message.PrivateMessage{Id: -1})
+				res = append(res, &adapter.PrivateMessage{ID: -1})
 			} else {
-				res = append(res, &message.PrivateMessage{Id: msgID})
+				res = append(res, &adapter.PrivateMessage{ID: int64(msgID), UserID: target.TargetCode()})
 			}
 		case mmsg.TargetGroup:
 			msgID, _, err := l.sendGroupForwardMessage(target.TargetCode(), forwardNodes, forwardOptions)
 			if err != nil {
-				res = append(res, &message.GroupMessage{Id: -1})
+				res = append(res, &adapter.GroupMessage{ID: -1})
 			} else {
-				res = append(res, &message.GroupMessage{Id: msgID})
+				res = append(res, &adapter.GroupMessage{ID: int64(msgID), GroupCode: target.TargetCode()})
 			}
 		}
 		return
@@ -1120,19 +1118,21 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 
 	msgs := m.ToMessage(target)
 	if len(msgs) == 0 {
-		switch target.TargetType() {
-		case mmsg.TargetPrivate:
-			res = append(res, &message.PrivateMessage{Id: -1})
-		case mmsg.TargetGroup:
-			res = append(res, &message.GroupMessage{Id: -1})
-		}
+		res = append(res, failure())
 		return
 	}
 	for idx, msg := range msgs {
 		r := l.send(msg, target)
 		res = append(res, r)
-		if reflect.ValueOf(r).Elem().FieldByName("Id").Int() == -1 {
-			break
+		switch v := r.(type) {
+		case *adapter.GroupMessage:
+			if v.ID == -1 {
+				return
+			}
+		case *adapter.PrivateMessage:
+			if v.ID == -1 {
+				return
+			}
 		}
 		if idx > 1 {
 			time.Sleep(time.Millisecond * 300)
@@ -1141,96 +1141,103 @@ func (l *Lsp) SendMsg(m *mmsg.MSG, target mmsg.Target) (res []interface{}) {
 	return res
 }
 
-func (l *Lsp) GM(res []interface{}) []*message.GroupMessage {
-	var result []*message.GroupMessage
+func (l *Lsp) AGM(res []interface{}) []*adapter.GroupMessage {
+	var result []*adapter.GroupMessage
 	for _, r := range res {
-		result = append(result, r.(*message.GroupMessage))
+		result = append(result, r.(*adapter.GroupMessage))
 	}
 	return result
 }
 
-func (l *Lsp) PM(res []interface{}) []*message.PrivateMessage {
-	var result []*message.PrivateMessage
+func (l *Lsp) APM(res []interface{}) []*adapter.PrivateMessage {
+	var result []*adapter.PrivateMessage
 	for _, r := range res {
-		result = append(result, r.(*message.PrivateMessage))
+		result = append(result, r.(*adapter.PrivateMessage))
 	}
 	return result
 }
 
-func (l *Lsp) sendPrivateMessage(uin int64, msg *message.SendingMessage) (res *message.PrivateMessage) {
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
-		return &message.PrivateMessage{Id: -1, Elements: msg.Elements}
-	}
+func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *adapter.PrivateMessage) {
 	if msg == nil {
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with nil private message")
-		return &message.PrivateMessage{Id: -1}
+		return &adapter.PrivateMessage{ID: -1}
 	}
-	msg.Elements = localutils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
+	if bot.Instance == nil || !bot.Instance.Online.Load() {
+		return &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
+	}
+	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
 		return element != nil
 	})
 	if len(msg.Elements) == 0 {
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with empty private message")
-		return &message.PrivateMessage{Id: -1}
+		return &adapter.PrivateMessage{ID: -1}
 	}
-	var newstring = msgstringer.MsgToString(msg.Elements)
+	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
 	res = bot.Instance.SendPrivateMessage(uin, msg, newstring)
-	if res == nil || res.Id == -1 {
-		logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+	if res == nil || res.ID == -1 {
+		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
 			WithFields(localutils.GroupLogFields(uin)).
 			Errorf("发送私聊消息失败")
 	}
 	if res == nil {
-		res = &message.PrivateMessage{Id: -1, Elements: msg.Elements}
+		res = &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
 	}
 	return res
 }
 
-// sendGroupMessage 发送一条消息，返回值总是非nil，Id为-1表示发送失败
-// miraigo偶尔发送消息会panic？！
-func (l *Lsp) sendGroupMessage(groupCode int64, msg *message.SendingMessage, recovered ...bool) (res *message.GroupMessage) {
+// sendGroupMessage 发送一条消息，返回值总是非nil，ID为-1表示发送失败
+func (l *Lsp) sendGroupMessage(groupCode int64, msg *adapter.SendingMessage, recovered ...bool) (res *adapter.GroupMessage) {
 	defer func() {
 		if e := recover(); e != nil {
+			content := ""
+			if msg != nil {
+				content = msgstringer.AdapterMsgToString(msg.Elements)
+			}
 			if len(recovered) == 0 {
-				logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+				logger.WithField("content", content).
 					WithField("stack", string(debug.Stack())).
 					Errorf("sendGroupMessage panic recovered")
 				res = l.sendGroupMessage(groupCode, msg, true)
 			} else {
-				logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
+				logger.WithField("content", content).
 					WithField("stack", string(debug.Stack())).
 					Errorf("sendGroupMessage panic recovered but panic again %v", e)
-				res = &message.GroupMessage{Id: -1, Elements: msg.Elements}
+				elements := []adapter.IMessageElement(nil)
+				if msg != nil {
+					elements = msg.Elements
+				}
+				res = &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: elements}
 			}
 		}
 	}()
-	if bot.Instance == nil {
-		return &message.GroupMessage{Id: -1, Elements: msg.Elements}
-	}
-	if l.LspStateManager.IsMuted(groupCode, bot.Instance.Uin) &&
-		!l.PermissionStateManager.CheckGroupAdministrator(groupCode, bot.Instance.Uin) {
-		logger.WithField("content", msgstringer.MsgToString(msg.Elements)).
-			WithFields(localutils.GroupLogFields(groupCode)).
-			Debug("BOT被禁言无法发送群消息")
-		return &message.GroupMessage{Id: -1, Elements: msg.Elements}
-	}
 	if msg == nil {
 		logger.Debug("消息为空，返回")
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("send with nil group message")
-		return &message.GroupMessage{Id: -1}
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode}
 	}
-	msg.Elements = localutils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
+	if bot.Instance == nil {
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
+	}
+	if l.LspStateManager.IsMuted(groupCode, bot.Instance.Uin) &&
+		!l.PermissionStateManager.CheckGroupAdministrator(groupCode, bot.Instance.Uin) {
+		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
+			WithFields(localutils.GroupLogFields(groupCode)).
+			Debug("BOT被禁言无法发送群消息")
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
+	}
+	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
 		return element != nil
 	})
 	if len(msg.Elements) == 0 {
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("send with empty group message")
-		return &message.GroupMessage{Id: -1}
+		return &adapter.GroupMessage{ID: -1, GroupCode: groupCode}
 	}
-	var newstring = msgstringer.MsgToString(msg.Elements)
+	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
 	ret := bot.Instance.SendGroupMessage(groupCode, msg, newstring)
 	res = ret.RetMSG
 	err := ret.Error
 	if err != nil {
-		msgStr := msgstringer.MsgToString(msg.Elements)
+		msgStr := msgstringer.AdapterMsgToString(msg.Elements)
 		if len(msgStr) > 150 {
 			msgStr = msgStr[:150] + "..."
 		}
@@ -1240,7 +1247,7 @@ func (l *Lsp) sendGroupMessage(groupCode int64, msg *message.SendingMessage, rec
 	}
 	if res == nil {
 		logger.WithFields(localutils.GroupLogFields(groupCode)).Debug("failed to send message")
-		res = &message.GroupMessage{Id: -1, Elements: msg.Elements}
+		res = &adapter.GroupMessage{ID: -1, GroupCode: groupCode, Elements: msg.Elements}
 	}
 	return res
 }

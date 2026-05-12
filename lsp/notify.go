@@ -6,7 +6,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	lsptelegram "github.com/cnxysoft/DDBOT-WSa/lsp/telegram"
@@ -95,7 +95,7 @@ func (l *Lsp) ConcernNotify() {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			if err := l.msgLimit.Acquire(ctx, 1); err != nil {
 				cancel()
-				nLogger.WithField("Content", msgstringer.MsgToString(m.Elements())).
+				nLogger.WithField("Content", msgstringer.AdapterMsgToString(m.Elements())).
 					Errorf("BOT负载过高，推送已积压超过一分钟，将舍弃本次推送。")
 				continue
 			}
@@ -118,7 +118,7 @@ func (l *Lsp) ConcernNotify() {
 					return
 				}
 
-				msgs := l.GM(l.SendMsg(m, target))
+				msgs := l.AGM(l.SendMsg(m, target))
 				if len(msgs) > 0 {
 					cfg.NotifyAfterCallback(inotify, msgs[0])
 				}
@@ -126,27 +126,25 @@ func (l *Lsp) ConcernNotify() {
 				if atBeforeHook.Pass {
 					var atIdsOnce bool
 					for _, msg := range msgs {
-						if msg.Id == -1 {
+						if msg.ID == -1 {
 							// 检查有没有@全体成员
-							e := utils.MessageFilter(msg.Elements, func(element message.IMessageElement) bool {
-								return element.Type() == message.At && element.(*message.AtElement).Target == 0
-							})
+							e := utils.AdapterMessageFilter(msg.Elements, isAtAllElement)
 							if len(e) == 0 {
 								continue
 							}
 							// 2022/09/24 现在@全员不会再作为单独一条消息
 							// 有@全体成员的消息应该去掉之后重试
-							secondM := mmsg.NewMSGFromGroupMessage(msg)
-							secondM.Drop(func(e message.IMessageElement, _ int) bool {
-								return e.Type() == message.At && e.(*message.AtElement).Target == 0
+							secondM := mmsg.NewMSGFromGroupMessage(&adapter.GroupMessage{Elements: msg.Elements})
+							secondM.Drop(func(e adapter.IMessageElement, _ int) bool {
+								return isAtAllElement(e)
 							})
 
-							secondRes := l.GM(l.SendMsg(secondM, target))
+							secondRes := l.AGM(l.SendMsg(secondM, target))
 							// secondRes一定是一条
 							if len(secondRes) != 1 {
 								panic(fmt.Sprintf("INTERNAL: len(secondRes) is %v", len(secondRes)))
 							}
-							if secondRes[0].Id == -1 {
+							if secondRes[0].ID == -1 {
 								// 去掉@全员还是发送失败
 								continue
 							}
@@ -174,6 +172,11 @@ func (l *Lsp) ConcernNotify() {
 
 func (l *Lsp) NotifyMessage(inotify concern.Notify) *mmsg.MSG {
 	return inotify.ToMessage()
+}
+
+func isAtAllElement(element adapter.IMessageElement) bool {
+	at, ok := element.(*adapter.AtSegment)
+	return ok && at.Target == 0
 }
 
 func newAtAllMsg(m *mmsg.MSG) *mmsg.MSG {

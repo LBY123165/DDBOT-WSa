@@ -1,10 +1,8 @@
 /.idea
-Sora233-MiraiGo
 DDBOT
 /.coverage.out
 /coverage.html
 /qrcode.png
-/session.token
 /dist/
 /version*.json
 /debug
@@ -28,8 +26,8 @@ package*.json
 # AI Agent documentation (local)
 /AGENTS.md
 /CLAUDE.md
-/.claude/worktrees/
-/.playwright-mcp/
+.claude/
+.playwright-mcp/
 
 # Runtime data - DO NOT COMMIT
 /res/

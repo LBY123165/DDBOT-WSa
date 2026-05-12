@@ -12,20 +12,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
-	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
-	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
-
 	templUtils "github.com/Sora233/MiraiGo-Template/utils"
-	"github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool"
 	"github.com/cnxysoft/DDBOT-WSa/requests"
-	"github.com/cnxysoft/DDBOT-WSa/utils"
+	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
 )
 
 const (
@@ -72,17 +69,17 @@ func (t *StateManager) GetGroupConcernConfig(groupCode int64, id interface{}) co
 	return NewGroupConcernConfig(t.StateManager.GetGroupConcernConfig(groupCode, id), t.concern)
 }
 
-func (t *StateManager) SetNotifyMsg(notifyKey string, msg *message.GroupMessage) error {
-	tmp := &message.GroupMessage{
-		Id:        msg.Id,
+func (t *StateManager) SetNotifyMsg(notifyKey string, msg *adapter.GroupMessage) error {
+	tmp := &adapter.GroupMessage{
+		ID:        msg.ID,
 		GroupCode: msg.GroupCode,
 		Sender:    msg.Sender,
 		Time:      msg.Time,
-		Elements: localutils.MessageFilter(msg.Elements, func(e message.IMessageElement) bool {
-			return e.Type() == message.Text || e.Type() == message.Image
+		Elements: localutils.AdapterMessageFilter(msg.Elements, func(e adapter.IMessageElement) bool {
+			return e.Type() == adapter.ElementTypeText || e.Type() == adapter.ElementTypeImage
 		}),
 	}
-	value, err := localutils.SerializationGroupMsg(tmp)
+	value, err := localutils.SerializationAdapterGroupMsg(tmp)
 	if err != nil {
 		return err
 	}
@@ -90,12 +87,12 @@ func (t *StateManager) SetNotifyMsg(notifyKey string, msg *message.GroupMessage)
 		localdb.SetExpireOpt(CompactExpireTime), localdb.SetNoOverWriteOpt())
 }
 
-func (t *StateManager) GetNotifyMsg(groupCode int64, notifyKey string) (*message.GroupMessage, error) {
+func (t *StateManager) GetNotifyMsg(groupCode int64, notifyKey string) (*adapter.GroupMessage, error) {
 	value, err := t.Get(t.NotifyMsgKey(groupCode, notifyKey))
 	if err != nil {
 		return nil, err
 	}
-	return localutils.DeserializationGroupMsg(value)
+	return localutils.DeserializationAdapterGroupMsg(value)
 }
 
 func (t *StateManager) SetGroupCompactMarkIfNotExist(groupCode int64, compactKey string) error {
@@ -160,7 +157,7 @@ retry:
 		}
 
 		// 解压缩HTML
-		body, err := utils.HtmlDecoder(respHeaders.ContentEncoding, resp)
+		body, err := localutils.HtmlDecoder(respHeaders.ContentEncoding, resp)
 		if err != nil {
 			logger.WithField("Mirror", Url.Hostname()).
 				WithField("User", id).Errorf("解压缩HTML失败：%v", err)
@@ -303,7 +300,7 @@ func (t *twitterConcern) Add(ctx mmsg.IMsgCtx, groupCode int64, id interface{}, 
 }
 
 func (t *twitterConcern) removeUserInfo(id string) error {
-	_, err := t.Delete(t.UserInfoKey(id), buntdb.IgnoreNotFoundOpt())
+	_, err := t.Delete(t.UserInfoKey(id), localdb.IgnoreNotFoundOpt())
 	return err
 }
 
@@ -579,7 +576,7 @@ retry:
 	}
 
 	// 解压缩HTML
-	body, err := utils.HtmlDecoder(respHeaders.ContentEncoding, resp)
+	body, err := localutils.HtmlDecoder(respHeaders.ContentEncoding, resp)
 	if err != nil {
 		logger.WithField("Mirror", Url.Hostname()).
 			WithField("userId", id).Errorf("解压缩HTML失败：%v", err)

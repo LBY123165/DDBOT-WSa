@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
@@ -32,7 +32,7 @@ func (m *mockMsgCtx) Send(msg *mmsg.MSG) interface{}    { return nil }
 func (m *mockMsgCtx) NoPermissionReply() interface{}    { return nil }
 func (m *mockMsgCtx) GetLog() *logrus.Entry             { return logrus.NewEntry(logrus.StandardLogger()) }
 func (m *mockMsgCtx) GetTarget() mmsg.Target            { return mmsg.NewGroupTarget(m.groupCode) }
-func (m *mockMsgCtx) GetSender() *message.Sender        { return &message.Sender{Uin: 10000} }
+func (m *mockMsgCtx) GetSender() *adapter.SenderInfo    { return &adapter.SenderInfo{UserID: 10000} }
 
 type AddSubRequest struct {
 	Site      string      `json:"site"`

@@ -71,23 +71,6 @@ func SetUpLog() {
 
 // Run 启动 bot，这个函数会阻塞直到收到退出信号
 func Run() {
-	if fi, err := os.Stat("device.json"); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("警告：没有检测到 device.json，正在生成，如果是第一次运行，可忽略")
-			bot.GenRandomDevice()
-		} else {
-			warn.Warn(fmt.Sprintf("检查 device.json 文件失败 - %v", err))
-			os.Exit(1)
-		}
-	} else {
-		if fi.IsDir() {
-			warn.Warn("检测到 device.json，但目标是一个文件夹！请手动确认并删除该文件夹！")
-			os.Exit(1)
-		} else {
-			fmt.Println("检测到 device.json，使用存在的 device.json")
-		}
-	}
-
 	if fi, err := os.Stat("application.yaml"); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("警告：没有检测到配置文件 application.yaml，正在生成，如果是第一次运行，可忽略")
@@ -146,9 +129,6 @@ func Run() {
 	bot.StartService()
 
 	_, _ = admin.Start(&bot.Instance.Online, nil)
-
-	// 登录 跳过登录
-	//bot.Login()
 
 	// 刷新好友列表，群列表
 	//以后刷新
@@ -275,10 +255,10 @@ weibo:
                           #      4) 需要配合 cookieRefreshAPI 使用
                           # 注意：不会修改配置文件中的 weibo.sub，每次重启重新获取
   
-  # API 模式配置（mode: api 或 mode: login + autorefresh 时使用）
-  # 从外部 API 自动获取 Cookie，无需手动配置 sub 或扫码登录
-  # API 返回的所有 Cookie 中只会提取 SUB 和 XSRF-TOKEN 使用
-  cookieRefreshAPI: "http://127.0.0.1:5000/api/Weibo/GetWeiboCookie"  # Cookie 刷新 API 地址
+  # API 模式配置（mode: api 时使用）
+  # API 模式直接从外部 API 获取微博数据，无需 Cookie
+  # API 返回的数据格式需与微博移动端 API 兼容
+  apiModeBaseURL: "http://127.0.0.1:5000"  # API 模式基础地址，完整 URL 为 {baseURL}/api/Weibo/GetMobileCards?uid=uid
 
   # SnapCast 服务地址，用于访客模式生成 rid
   # 如果留空则使用默认地址 https://sc.znin.net/render

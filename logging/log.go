@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Mrs4s/MiraiGo/client"
-	"github.com/Mrs4s/MiraiGo/message"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
@@ -123,19 +121,19 @@ func (m *logging) Stop(b *bot.Bot, wg *sync.WaitGroup) {
 	// 在此处应该释放相应的资源或者对状态进行保存
 }
 
-func logGroupMessage(msg *message.GroupMessage) {
-	name := msg.Sender.CardName
+func logGroupMessage(msg *adapter.GroupMessage) {
+	name := msg.Sender.Card
 	if name == "" {
 		name = msg.Sender.Nickname
 	}
-	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.Uin, msgstringer.MsgToString(msg.Elements), msg.Id)
+	logger.Infof("收到群 %s(%d) 内 %s(%d) 的消息: %s (%d)", msg.GroupName, msg.GroupCode, name, msg.Sender.UserID, msgstringer.AdapterMsgToString(msg.Elements), msg.ID)
 }
 
-func logPrivateMessage(msg *message.PrivateMessage) {
-	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.Uin, msgstringer.MsgToString(msg.Elements), msg.Id)
+func logPrivateMessage(msg *adapter.PrivateMessage) {
+	logger.Infof("收到 %s(%d) 的私聊消息: %s (%d)", msg.Sender.Nickname, msg.Sender.UserID, msgstringer.AdapterMsgToString(msg.Elements), msg.ID)
 }
 
-func logFriendMessageRecallEvent(event *client.FriendMessageRecalledEvent) {
+func logFriendMessageRecallEvent(event *adapter.FriendMessageRecalledEvent) {
 	logger.WithFields(logrus.Fields{
 		"From":      "FriendsMessageRecall",
 		"MessageID": event.MessageId,
@@ -143,7 +141,7 @@ func logFriendMessageRecallEvent(event *client.FriendMessageRecalledEvent) {
 	}).Info("好友消息撤回")
 }
 
-func logGroupMessageRecallEvent(event *client.GroupMessageRecalledEvent) {
+func logGroupMessageRecallEvent(event *adapter.GroupMessageRecalledEvent) {
 	logger.WithFields(localutils.GroupLogFields(event.GroupCode)).
 		WithFields(logrus.Fields{
 			"From":       "GroupMessageRecall",
@@ -153,7 +151,7 @@ func logGroupMessageRecallEvent(event *client.GroupMessageRecalledEvent) {
 		}).Info("群消息撤回")
 }
 
-func logGroupMuteEvent(event *client.GroupMuteEvent) {
+func logGroupMuteEvent(event *adapter.GroupMuteEvent) {
 	muteLogger := logger.WithFields(localutils.GroupLogFields(event.GroupCode)).
 		WithFields(logrus.Fields{
 			"From":        "GroupMute",
@@ -187,7 +185,7 @@ func logGroupMuteEvent(event *client.GroupMuteEvent) {
 	}
 }
 
-func logDisconnect(event *client.ClientDisconnectedEvent) {
+func logDisconnect(event *adapter.ClientDisconnectedEvent) {
 	logger.WithFields(logrus.Fields{
 		"From":   "Disconnected",
 		"Reason": event.Message,
@@ -195,27 +193,27 @@ func logDisconnect(event *client.ClientDisconnectedEvent) {
 }
 
 func registerLog(b *bot.Bot) {
-	b.GroupMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMessageRecalledEvent) {
+	b.GroupMessageRecalledEvent.Subscribe(func(event *adapter.GroupMessageRecalledEvent) {
 		logGroupMessageRecallEvent(event)
 	})
 
-	b.GroupMessageEvent.Subscribe(func(qqClient *client.QQClient, groupMessage *message.GroupMessage) {
-		logGroupMessage(groupMessage)
+	b.GroupMessageEvent.Subscribe(func(msg *adapter.GroupMessage) {
+		logGroupMessage(msg)
 	})
 
-	b.GroupMuteEvent.Subscribe(func(qqClient *client.QQClient, event *client.GroupMuteEvent) {
+	b.GroupMuteEvent.Subscribe(func(event *adapter.GroupMuteEvent) {
 		logGroupMuteEvent(event)
 	})
 
-	b.PrivateMessageEvent.Subscribe(func(qqClient *client.QQClient, privateMessage *message.PrivateMessage) {
+	b.PrivateMessageEvent.Subscribe(func(privateMessage *adapter.PrivateMessage) {
 		logPrivateMessage(privateMessage)
 	})
 
-	b.FriendMessageRecalledEvent.Subscribe(func(qqClient *client.QQClient, event *client.FriendMessageRecalledEvent) {
+	b.FriendMessageRecalledEvent.Subscribe(func(event *adapter.FriendMessageRecalledEvent) {
 		logFriendMessageRecallEvent(event)
 	})
 
-	b.DisconnectedEvent.Subscribe(func(qqClient *client.QQClient, event *client.ClientDisconnectedEvent) {
+	b.DisconnectedEvent.Subscribe(func(event *adapter.ClientDisconnectedEvent) {
 		logDisconnect(event)
 	})
 
