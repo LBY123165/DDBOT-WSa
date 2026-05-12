@@ -28,6 +28,8 @@ package*.json
 # AI Agent documentation (local)
 /AGENTS.md
 /CLAUDE.md
+/.claude/worktrees/
+/.playwright-mcp/
 
 # Runtime data - DO NOT COMMIT
 /res/
