@@ -26,7 +26,11 @@ package*.json
 # AI Agent documentation (local)
 /AGENTS.md
 /CLAUDE.md
+
+# Claude Code configuration
 .claude/
+
+# Playwright MCP runtime data
 .playwright-mcp/
 
 # Runtime data - DO NOT COMMIT
