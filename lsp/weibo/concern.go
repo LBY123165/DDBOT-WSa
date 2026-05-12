@@ -30,7 +30,7 @@ func (c *Concern) Site() string {
 }
 
 func (c *Concern) Types() []concern_type.Type {
-	return []concern_type.Type{News, CookieAlert}
+	return []concern_type.Type{News}
 }
 
 func (c *Concern) ParseId(s string) (interface{}, error) {
@@ -377,6 +377,8 @@ func (c *Concern) notifyGenerator() concern.NotifyGeneratorFunc {
 					result = append(result, n)
 				}
 			}
+		case *CookieAlertNotify:
+			result = append(result, news)
 		}
 		return result
 	}

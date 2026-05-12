@@ -268,7 +268,7 @@ func ForceFreshCookie() bool {
 	var opt []requests.Option
 	hasSUB := false
 	hasXSRF := false
-	
+
 	for _, cookie := range cookies {
 		if cookie.Name == "SUB" {
 			hasSUB = true
@@ -288,7 +288,7 @@ func ForceFreshCookie() bool {
 			opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
 		}
 	}
-	
+
 	// 确保 SUB 和 XSRF-TOKEN 不会丢失
 	if !hasSUB && existingSUB != "" {
 		opt = append(opt, requests.CookieOption("SUB", existingSUB))
@@ -304,14 +304,6 @@ func ForceFreshCookie() bool {
 	return true
 }
 
-// extractCookieValue 从 Cookie Option 列表中提取指定名称的 Cookie 值
-// 注：这是一个辅助函数，因为 requests.ExtractCookieOption 可能不存在或实现不同
 func extractCookieValue(opts []requests.Option, name string) string {
-	if opts == nil {
-		return ""
-	}
-	// Cookie 保存在 option 结构体中，但我们无法直接访问
-	// 这里返回空字符串，让 ForceFreshCookie 使用新获取的 Cookie
-	// 完整的实现需要在 requests 包中添加 ExtractCookieOption 函数
-	return ""
+	return requests.ExtractCookieOption(opts, name)
 }

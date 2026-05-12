@@ -1,11 +1,13 @@
 package weibo
 
 import (
-	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
-	"github.com/stretchr/testify/assert"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/cnxysoft/DDBOT-WSa/requests"
+	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestFreshCookie(t *testing.T) {
@@ -17,4 +19,22 @@ func TestFreshCookie(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.NotEmpty(t, cookies)
+}
+
+func TestExtractCookieValue(t *testing.T) {
+	opts := []requests.Option{
+		requests.CookieOption("SUB", "sub-value"),
+		requests.CookieOption("SUBP", "subp-value"),
+		requests.CookieOption("XSRF-TOKEN", "token=value"),
+	}
+
+	if got := extractCookieValue(opts, "SUB"); got != "sub-value" {
+		t.Fatalf("extractCookieValue(SUB) = %q, want sub-value", got)
+	}
+	if got := extractCookieValue(opts, "XSRF-TOKEN"); got != "token=value" {
+		t.Fatalf("extractCookieValue(XSRF-TOKEN) = %q, want token=value", got)
+	}
+	if got := extractCookieValue(opts, "missing"); got != "" {
+		t.Fatalf("extractCookieValue(missing) = %q, want empty", got)
+	}
 }

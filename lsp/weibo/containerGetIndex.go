@@ -42,6 +42,7 @@ func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileRe
 	profileResp := new(ApiContainerGetIndexProfileResponse)
 	err := requests.Get(PathConcainerGetIndex_Profile_Login, CreateParam(uid), &profileResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 	return profileResp, nil
@@ -54,6 +55,7 @@ func apiContainerGetIndexProfileGuest(uid int64) (*ApiContainerGetIndexProfileRe
 	guestResp := new(apiContainerGetIndexGuestProfileResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestProfileParam(uid), &guestResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 	return guestResp.ToProfileResponse(), nil
@@ -70,23 +72,6 @@ func apiContainerGetIndexProfileAPI(uid int64) (*ApiContainerGetIndexProfileResp
 	profileResp := new(ApiContainerGetIndexProfileResponse)
 	err := requests.Get(apiURL, nil, &profileResp)
 	if err != nil {
-		if isCookieFailure(err) {
-			logger.Warnf("uid=%d: 检测到Cookie失效，尝试刷新并重试ApiContainerGetIndexProfile", uid)
-			if ForceFreshCookie() {
-				var retryOpts []requests.Option
-				retryOpts = append(retryOpts,
-					requests.ProxyOption(proxy_pool.PreferNone),
-					requests.AddUAOption(),
-					requests.TimeoutOption(time.Second*10),
-				)
-				retryOpts = append(retryOpts, CookieOption()...)
-				profileResp = new(ApiContainerGetIndexProfileResponse)
-				if retryErr := requests.Get(apiURL, nil, &profileResp, retryOpts...); retryErr == nil {
-					logger.Infof("uid=%d: Cookie刷新成功，ApiContainerGetIndexProfile重试成功", uid)
-					return profileResp, nil
-				}
-			}
-		}
 		return nil, err
 	}
 	return profileResp, nil
@@ -142,10 +127,9 @@ func apiContainerGetIndexCardsLogin(uid int64) (*ApiContainerGetIndexCardsRespon
 	profileResp := new(ApiContainerGetIndexCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &profileResp, opts...)
 	if err != nil {
-		// 调试：打印错误详情
+		markCookieUnhealthy(err)
 		logger.Errorf("uid=%d: 请求失败 - %v", uid, err)
 
-		// 尝试获取原始响应内容，看看返回了什么
 		var rawResp map[string]interface{}
 		rawErr := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &rawResp, opts...)
 		if rawErr != nil {
@@ -178,23 +162,6 @@ func apiContainerGetIndexCardsAPI(uid int64) (*ApiContainerGetIndexCardsResponse
 	cardsResp := new(ApiContainerGetIndexCardsResponse)
 	err := requests.Get(apiURL, nil, &cardsResp)
 	if err != nil {
-		if isCookieFailure(err) {
-			logger.Warnf("uid=%d: 检测到Cookie失效，尝试刷新并重试ApiContainerGetIndexCards", uid)
-			if ForceFreshCookie() {
-				var retryOpts []requests.Option
-				retryOpts = append(retryOpts,
-					requests.ProxyOption(proxy_pool.PreferNone),
-					requests.AddUAOption(),
-					requests.TimeoutOption(time.Second*10),
-				)
-				retryOpts = append(retryOpts, CookieOption()...)
-				cardsResp = new(ApiContainerGetIndexCardsResponse)
-				if retryErr := requests.Get(apiURL, nil, &cardsResp, retryOpts...); retryErr == nil {
-					logger.Infof("uid=%d: Cookie刷新成功，ApiContainerGetIndexCards重试成功", uid)
-					return cardsResp, nil
-				}
-			}
-		}
 		return nil, err
 	}
 	return cardsResp, nil
@@ -210,6 +177,7 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 	guestResp := new(apiContainerGetIndexGuestCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 
@@ -227,6 +195,7 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 			guestResp = new(apiContainerGetIndexGuestCardsResponse)
 			err = requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
 			if err != nil {
+				markCookieUnhealthy(err)
 				return nil, err
 			}
 			resp = guestResp.ToCardsResponse()
@@ -342,6 +311,13 @@ func CreateGuestReferer(uid int64) string {
 
 func isGuestMode() bool {
 	return strings.EqualFold(cfg.GetWeiboMode(), "guest")
+}
+
+func markCookieUnhealthy(err error) {
+	if err != nil && isCookieFailure(err) {
+		cookieHealthy.Store(false)
+		consecutiveCookieFails.Inc()
+	}
 }
 
 // isCookieFailure 判断是否是 Cookie 失效导致的错误（API 返回了 HTML）
