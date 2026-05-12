@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	pathWeiboCfg               = "https://m.weibo.cn/api/config"
 	pathWeiboPub               = "https://weibo.cn/pub"
 	pathWeiboCN                = "https://m.weibo.cn/"
 	pathWeiboDesktop           = "https://weibo.com"
@@ -29,7 +28,7 @@ const (
 )
 
 var (
-	genvisitorRegex        = regexp.MustCompile(`\((.*)\)`)
+	genvisitorRegex       = regexp.MustCompile(`\((.*)\)`)
 	freshCookiePauseUntil atomic.Int64 // 暂停截止时间戳（Unix），0表示未暂停
 )
 
@@ -67,7 +66,8 @@ func getSnapCastRid(ua string) (*SnapCastRidInfo, error) {
 		return nil, fmt.Errorf("marshal payload failed: %w", err)
 	}
 
-	resp, err := http.Post(getSnapCastURL(), "application/json", strings.NewReader(string(body)))
+	client := &http.Client{Timeout: time.Second * 10}
+	resp, err := client.Post(getSnapCastURL(), "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, fmt.Errorf("post to snapcast failed: %w", err)
 	}
@@ -205,7 +205,7 @@ func refreshLoginXsrfToken(jar *cookiejar.Jar, ua string) error {
 }
 
 func FreshCookieGuest() ([]*http.Cookie, error) {
-	JAR, _ = cookiejar.New(nil)
+	jar, _ := cookiejar.New(nil)
 
 	ua := requests.RandomUA(requests.Chrome)
 	visitorUA.Store(ua)
@@ -226,7 +226,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	}
 	logger.Infof("获取 rid 成功: %s, UA: %s", info.Rid, uaPreview)
 
-	err = refreshGuestPub(JAR, ua)
+	err = refreshGuestPub(jar, ua)
 	if err != nil {
 		logger.Errorf("refreshGuestPub error %v", err)
 		return nil, err
@@ -236,7 +236,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
 
 	var requestID string
-	requestID, err = GetRequestId(JAR, ua)
+	requestID, err = GetRequestId(jar, ua)
 	if err != nil {
 		logger.Errorf("GetRequestId error %v", err)
 		return nil, err
@@ -245,7 +245,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	// 随机延迟 1-3s
 	time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
 
-	genVisitorResp, err := genvisitorGuest(requestID, info.Rid, requests.WithCookieJar(JAR), requests.AddUAOption(ua))
+	genVisitorResp, err := genvisitorGuest(requestID, info.Rid, requests.WithCookieJar(jar), requests.AddUAOption(ua))
 	if err != nil {
 		logger.Errorf("genvisitor error %v", err)
 		return nil, err
@@ -262,7 +262,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	// 随机延迟 1-3s
 	time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
 
-	err = refreshGuestCN(JAR, ua)
+	err = refreshGuestCN(jar, ua)
 	if err != nil {
 		logger.Errorf("refreshGuestCN error %v", err)
 		return nil, err
@@ -272,7 +272,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	if err != nil {
 		panic(fmt.Sprintf("path %v url parse error", pathWeiboCN))
 	}
-	return JAR.Cookies(cookieUrl), nil
+	return jar.Cookies(cookieUrl), nil
 }
 
 func FreshCookieLogin() ([]*http.Cookie, error) {

@@ -162,7 +162,13 @@ func NewEmitQueue(c chan<- *EmitE, interval time.Duration) *EmitQueue {
 }
 
 func (q *EmitQueue) nextInterval() time.Duration {
-	// 添加 ±25% 随机抖动
-	jitter := time.Duration(rand.Int63n(int64(q.TimeInterval/2)))
+	if q.TimeInterval <= 0 {
+		return q.TimeInterval
+	}
+	jitterRange := q.TimeInterval / 2
+	if jitterRange <= 0 {
+		return q.TimeInterval
+	}
+	jitter := time.Duration(rand.Int63n(int64(jitterRange)))
 	return q.TimeInterval + jitter - (q.TimeInterval / 4)
 }

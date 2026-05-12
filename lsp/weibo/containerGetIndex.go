@@ -32,7 +32,9 @@ func ApiContainerGetIndexProfile(uid int64) (*ApiContainerGetIndexProfileRespons
 }
 
 func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileResponse, error) {
+	cookieOpts := CookieOption()
 	opts := buildRequestOptions(CreateReferer(uid))
+	opts = append(opts, cookieOpts...)
 	opts = append(opts, SetXsrfToken(opts))
 
 	profileResp := new(ApiContainerGetIndexProfileResponse)
@@ -45,6 +47,7 @@ func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileRe
 
 func apiContainerGetIndexProfileGuest(uid int64) (*ApiContainerGetIndexProfileResponse, error) {
 	opts := buildRequestOptions(CreateGuestReferer(uid))
+	opts = append(opts, CookieOption()...)
 	GetUserPage(uid, opts...)
 
 	guestResp := new(apiContainerGetIndexGuestProfileResponse)
@@ -134,10 +137,10 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 	// Guest 模式：使用自动生成的访客 Cookie
 	var opts []requests.Option
 	var cookieOpts []requests.Option
-	if cfg.IsWeiboAPIMode() {
+	if cfg.IsWeiboAPIMode() || isGuestMode() {
 		cookieOpts = CookieOption()
 		if len(cookieOpts) == 0 {
-			logger.Warnf("uid=%d: API 模式 CookieOption 为空", uid)
+			logger.Warnf("uid=%d: 移动端 CookieOption 为空", uid)
 		}
 		opts = append(opts, cookieOpts...)
 	}
@@ -170,6 +173,7 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 				cookieOpts = CookieOption()
 				opts = buildRequestOptions(CreateGuestReferer(uid))
 				opts = append(opts, cookieOpts...)
+				GetUserPage(uid, opts...)
 				guestResp := new(apiContainerGetIndexGuestCardsResponse)
 				err = requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
 				if err != nil {
@@ -185,7 +189,6 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 func buildRequestOptions(referer string) []requests.Option {
 	return []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferNone),
-		requests.WithCookieJar(JAR),
 		requests.AddUAOption(GetVisitorUA()),
 		requests.TimeoutOption(time.Second * 10),
 		requests.HeaderOption("referer", referer),

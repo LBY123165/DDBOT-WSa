@@ -58,21 +58,16 @@ func (o *option) getGout() *gout.Client {
 	if o.InsecureSkipVerify {
 		goutOpts = append(goutOpts, gout.WithInsecureSkipVerify())
 	}
-	if o.HTTP2 {
-		tr := &http.Transport{
-			ForceAttemptHTTP2: true,
+	if o.HTTP2 || o.CookieJar != nil || o.Transport != nil {
+		tr := o.Transport
+		if o.HTTP2 && tr == nil {
+			tr = &http.Transport{ForceAttemptHTTP2: true}
 		}
-		goutOpts = append(goutOpts, gout.WithClient(&http.Client{
-			Transport: tr,
-		}))
-	} else if o.CookieJar != nil {
-		goutOpts = append(goutOpts, gout.WithClient(&http.Client{
-			Jar: o.CookieJar,
-		}))
-	} else if o.Transport != nil {
-		goutOpts = append(goutOpts, gout.WithClient(&http.Client{
-			Transport: o.Transport,
-		}))
+		client := &http.Client{Jar: o.CookieJar}
+		if tr != nil {
+			client.Transport = tr
+		}
+		goutOpts = append(goutOpts, gout.WithClient(client))
 	}
 	df := gout.NewWithOpt(goutOpts...)
 	if o.NotIgnoreEmpty {
