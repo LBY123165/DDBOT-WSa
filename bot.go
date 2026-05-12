@@ -260,6 +260,11 @@ weibo:
   # API 返回的数据格式需与微博移动端 API 兼容
   apiModeBaseURL: "http://127.0.0.1:5000"  # API 模式基础地址，完整 URL 为 {baseURL}/api/Weibo/GetMobileCards?uid=uid
 
+  # SnapCast 服务地址，用于访客模式生成 rid
+  # 如果留空则使用默认地址 https://sc.znin.net/render
+  # 可配置为自建的 SnapCast 服务地址
+  snapcastURL: ""
+
 youtube:
   onlyOnlineNotify: true  # 是否不推送 Bot 离线期间的动态和直播，默认为 false 表示需要推送，设置为 true 表示不推送
 

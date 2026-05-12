@@ -14,6 +14,7 @@ const (
 
 var (
 	visitorCookiesOpt atomic.Value
+	visitorUA         atomic.String
 )
 
 func CookieOption() []requests.Option {
@@ -21,4 +22,11 @@ func CookieOption() []requests.Option {
 		return c.([]requests.Option)
 	}
 	return nil
+}
+
+func GetVisitorUA() string {
+	if ua := visitorUA.Load(); ua != "" {
+		return ua
+	}
+	return requests.DefaultUA()
 }
