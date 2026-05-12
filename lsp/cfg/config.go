@@ -235,6 +235,11 @@ func GetWeiboAutoRefresh() bool {
 	return config.GlobalConfig.GetBool("weibo.autorefresh")
 }
 
+// GetWeiboAlertGroupId 获取 Cookie 告警通知的目标群号，0 表示不发群
+func GetWeiboAlertGroupId() int64 {
+	return config.GlobalConfig.GetInt64("weibo.alertGroupId")
+}
+
 // GetSnapCastURL 获取 SnapCast 服务地址，用于生成微博 rid
 func GetSnapCastURL() string {
 	return strings.TrimSpace(config.GlobalConfig.GetString("weibo.snapcastURL"))

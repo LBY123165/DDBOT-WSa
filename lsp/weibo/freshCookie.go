@@ -25,6 +25,9 @@ const (
 	pathWeiboDesktop           = "https://weibo.com"
 	pathPassportGenvisitorTest = "https://visitor.passport.weibo.cn/visitor/genvisitor2"
 	pathPassportGenvisitorProd = "https://passport.weibo.com/visitor/genvisitor2"
+	pathPassportGenvisitor     = "https://passport.weibo.com/visitor/genvisitor"
+	pathPassportVisitor        = "https://passport.weibo.com/visitor/visitor"
+	pathLoginVisitor           = "https://login.sina.com.cn/visitor/visitor"
 )
 
 var (
@@ -218,7 +221,6 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	} else if info.UA != ua {
 		logger.Warnf("getSnapCastRid Warning: UserAgent invalid, return UA: %v", info.UA)
 		ua = info.UA
-		visitorUA.Store(ua)
 	}
 	uaPreview := info.UA
 	if len(uaPreview) > 20 {
@@ -272,6 +274,7 @@ func FreshCookieGuest() ([]*http.Cookie, error) {
 	if err != nil {
 		panic(fmt.Sprintf("path %v url parse error", pathWeiboCN))
 	}
+	visitorUA.Store(ua)
 	return jar.Cookies(cookieUrl), nil
 }
 
@@ -284,14 +287,14 @@ func FreshCookieLogin() ([]*http.Cookie, error) {
 
 	genVisitorResp, err := genvisitorLogin(requests.WithCookieJar(jar), requests.AddUAOption(ua))
 	if err != nil {
-		logger.Errorf("genvisitor error %v", err)
+		logger.Errorf("genvisitorLogin error %v", err)
 		return nil, err
 	}
 	if genVisitorResp.GetRetcode() != 20000000 || !strings.Contains(genVisitorResp.GetMsg(), "succ") {
 		logger.WithFields(logrus.Fields{
 			"Msg":     genVisitorResp.GetMsg(),
 			"Retcode": genVisitorResp.GetRetcode(),
-		}).Errorf("incarnateResp error")
+		}).Errorf("genvisitorLogin error")
 		return nil, fmt.Errorf("genvisitor response error %v - %v",
 			genVisitorResp.GetRetcode(), genVisitorResp.GetMsg())
 	}
@@ -356,6 +359,98 @@ func TryRefreshGuestCookie() bool {
 
 	logger.Infof("Guest Cookie 刷新成功，已更新到内存")
 	return true
+}
+
+func ForceFreshCookie() bool {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+
+	if cookieHealthy.Load() {
+		return true
+	}
+
+	// API 模式不需要 Cookie
+	if cfg.IsWeiboAPIMode() {
+		cookieHealthy.Store(true)
+		consecutiveCookieFails.Store(0)
+		return true
+	}
+
+	if isGuestMode() {
+		// Guest 模式：直接刷新全部 cookie
+		cookies, err := FreshCookieGuest()
+		if err != nil {
+			fails := consecutiveCookieFails.Inc()
+			cookieHealthy.Store(false)
+			logger.WithField("ConsecutiveFails", fails).Errorf("ForceFreshCookie Guest 失败: %v", err)
+			return false
+		}
+		var opt []requests.Option
+		for _, cookie := range cookies {
+			opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+		}
+		visitorCookiesOpt.Store(opt)
+		cookieHealthy.Store(true)
+		consecutiveCookieFails.Store(0)
+		logger.Infof("微博 Guest Cookie 刷新成功")
+		return true
+	}
+
+	// Login 模式：保留 SUB 和 XSRF-TOKEN，只刷新其他会话 cookie
+	currentOpts := CookieOption()
+	existingSUB := extractCookieValue(currentOpts, "SUB")
+	existingXSRF := extractCookieValue(currentOpts, "XSRF-TOKEN")
+
+	cookies, err := FreshCookieLogin()
+	if err != nil {
+		fails := consecutiveCookieFails.Inc()
+		cookieHealthy.Store(false)
+		logger.WithField("ConsecutiveFails", fails).Errorf("ForceFreshCookie Login 失败: %v", err)
+		return false
+	}
+
+	// 用 FreshCookieLogin 返回的 cookie 做基础，但保留现有的 SUB 和 XSRF-TOKEN
+	var opt []requests.Option
+	hasSUB := false
+	hasXSRF := false
+
+	for _, cookie := range cookies {
+		if cookie.Name == "SUB" {
+			hasSUB = true
+			if existingSUB != "" {
+				opt = append(opt, requests.CookieOption("SUB", existingSUB))
+			} else {
+				opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+			}
+		} else if cookie.Name == "XSRF-TOKEN" {
+			hasXSRF = true
+			if existingXSRF != "" {
+				opt = append(opt, requests.CookieOption("XSRF-TOKEN", existingXSRF))
+			} else {
+				opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+			}
+		} else {
+			opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+		}
+	}
+
+	// 确保 SUB 和 XSRF-TOKEN 不会丢失
+	if !hasSUB && existingSUB != "" {
+		opt = append(opt, requests.CookieOption("SUB", existingSUB))
+	}
+	if !hasXSRF && existingXSRF != "" {
+		opt = append(opt, requests.CookieOption("XSRF-TOKEN", existingXSRF))
+	}
+
+	visitorCookiesOpt.Store(opt)
+	cookieHealthy.Store(true)
+	consecutiveCookieFails.Store(0)
+	logger.Infof("微博 Login Cookie 刷新成功（保留 SUB 和 XSRF-TOKEN）")
+	return true
+}
+
+func extractCookieValue(opts []requests.Option, name string) string {
+	return requests.ExtractCookieOption(opts, name)
 }
 
 // PauseRefreshOnRateLimit 当触发 -100（频率限制）时暂停刷新

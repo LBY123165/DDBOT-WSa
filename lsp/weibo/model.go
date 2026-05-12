@@ -492,3 +492,58 @@ func findVideoForMix(Item []*Card_MixMediaInfo_Items, m *mmsg.MSG) {
 		}
 	}
 }
+
+// CookieAlertNotify Cookie 失效时的告警通知
+type CookieAlertNotify struct {
+	GroupCode   int64
+	Message     string
+	IsRecovery  bool
+}
+
+func (n *CookieAlertNotify) Site() string {
+	return Site
+}
+
+func (n *CookieAlertNotify) Type() concern_type.Type {
+	return CookieAlert
+}
+
+func (n *CookieAlertNotify) GetUid() interface{} {
+	return int64(0)
+}
+
+func (n *CookieAlertNotify) GetGroupCode() int64 {
+	return n.GroupCode
+}
+
+func (n *CookieAlertNotify) Logger() *logrus.Entry {
+	return logger.WithFields(logrus.Fields{
+		"Site":       Site,
+		"GroupCode":  n.GroupCode,
+		"IsRecovery": n.IsRecovery,
+	})
+}
+
+func (n *CookieAlertNotify) ToMessage() *mmsg.MSG {
+	m := mmsg.NewMSG()
+	m.Textf("[微博Cookie告警] %s", n.Message)
+	if n.IsRecovery {
+		m.Textf("\n✓ Cookie已自动恢复，订阅推送将正常工作")
+	} else {
+		m.Textf("\n⚠ Cookie获取失败，微博订阅可能无法正常推送")
+		m.Textf("\nBot会继续自动重试，无需手动操作")
+	}
+	return m
+}
+
+func NewCookieAlertNotify(groupCode int64, isRecovery bool) *CookieAlertNotify {
+	msg := "微博Cookie状态异常"
+	if isRecovery {
+		msg = "微博Cookie已恢复正常"
+	}
+	return &CookieAlertNotify{
+		GroupCode:  groupCode,
+		Message:    msg,
+		IsRecovery: isRecovery,
+	}
+}

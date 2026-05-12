@@ -117,13 +117,18 @@ func refreshSubFromAPI() error {
 	}
 	logger.Debugf("新 SUB: %s...", maskSub(newSub))
 
-	// 更新内存中的 Cookie
+	// 保存所有 cookie，保留完整的会话状态
 	opt := []requests.Option{
 		requests.CookieOption("SUB", newSub),
 	}
+	for _, cookie := range cookies {
+		if cookie.Name != "SUB" {
+			opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+		}
+	}
 	visitorCookiesOpt.Store(opt)
 
-	logger.Info("SUB 已成功更新到内存")
+	logger.Infof("SUB 已成功更新到内存，共加载 %d 个 cookie", len(opt))
 	return nil
 }
 

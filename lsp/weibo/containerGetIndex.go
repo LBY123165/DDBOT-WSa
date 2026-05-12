@@ -44,6 +44,7 @@ func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileRe
 	profileResp := new(ApiContainerGetIndexProfileResponse)
 	err := requests.Get(PathConcainerGetIndex_Profile_Login, CreateParam(uid), &profileResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 	return profileResp, nil
@@ -57,6 +58,7 @@ func apiContainerGetIndexProfileGuest(uid int64) (*ApiContainerGetIndexProfileRe
 	guestResp := new(apiContainerGetIndexGuestProfileResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestProfileParam(uid), &guestResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 	return guestResp.ToProfileResponse(), nil
@@ -128,10 +130,9 @@ func apiContainerGetIndexCardsLogin(uid int64) (*ApiContainerGetIndexCardsRespon
 	profileResp := new(ApiContainerGetIndexCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &profileResp, opts...)
 	if err != nil {
-		// 调试：打印错误详情
+		markCookieUnhealthy(err)
 		logger.Errorf("uid=%d: 请求失败 - %v", uid, err)
 
-		// 尝试获取原始响应内容，看看返回了什么
 		var rawResp map[string]interface{}
 		rawErr := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &rawResp, opts...)
 		if rawErr != nil {
@@ -183,6 +184,7 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 	guestResp := new(apiContainerGetIndexGuestCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
 	if err != nil {
+		markCookieUnhealthy(err)
 		return nil, err
 	}
 
@@ -199,21 +201,25 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 		if resp.GetOk() == 432 {
 			// 432: 需要人机验证，正常刷新 Cookie
 			logger.Warnf("uid=%d: 检测到 432 错误（人机验证），尝试刷新", uid)
-			if TryRefreshGuestCookie() {
-				// 刷新成功后重试一次
-				// 随机延迟 1-3s，避免固定间隔被检测
-				time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
-				cookieOpts = CookieOption()
-				opts = buildRequestOptions(CreateGuestReferer(uid))
-				opts = append(opts, cookieOpts...)
-				GetUserPage(uid, opts...)
-				guestResp := new(apiContainerGetIndexGuestCardsResponse)
-				err = requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
-				if err != nil {
-					return nil, err
-				}
-				resp = guestResp.ToCardsResponse()
+			if !TryRefreshGuestCookie() {
+				cookieHealthy.Store(false)
+				consecutiveCookieFails.Inc()
+				return resp, nil
 			}
+			// 刷新成功后重试一次
+			// 随机延迟 1-3s，避免固定间隔被检测
+			time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
+			cookieOpts = CookieOption()
+			opts = buildRequestOptions(CreateGuestReferer(uid))
+			opts = append(opts, cookieOpts...)
+			GetUserPage(uid, opts...)
+			guestResp := new(apiContainerGetIndexGuestCardsResponse)
+			err = requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
+			if err != nil {
+				markCookieUnhealthy(err)
+				return nil, err
+			}
+			resp = guestResp.ToCardsResponse()
 		}
 	}
 	return resp, nil
@@ -329,6 +335,23 @@ func CreateGuestReferer(uid int64) string {
 
 func isGuestMode() bool {
 	return strings.EqualFold(cfg.GetWeiboMode(), "guest")
+}
+
+func markCookieUnhealthy(err error) {
+	if err != nil && isCookieFailure(err) {
+		cookieHealthy.Store(false)
+		consecutiveCookieFails.Inc()
+	}
+}
+
+// isCookieFailure 判断是否是 Cookie 失效导致的错误（API 返回了 HTML）
+func isCookieFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "invalid character '<'") ||
+		strings.Contains(msg, "looking for beginning of value")
 }
 
 func GetUserPage(id int64, Opts ...requests.Option) error {

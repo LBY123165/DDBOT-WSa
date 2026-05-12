@@ -385,6 +385,8 @@ func (c *Concern) notifyGenerator() concern.NotifyGeneratorFunc {
 					result = append(result, n)
 				}
 			}
+		case *CookieAlertNotify:
+			result = append(result, news)
 		}
 		return result
 	}
