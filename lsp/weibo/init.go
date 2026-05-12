@@ -8,9 +8,9 @@ import (
 
 	"github.com/Sora233/MiraiGo-Template/bot"
 	"github.com/Sora233/MiraiGo-Template/config"
+	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
-	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/mmsg"
 	"github.com/cnxysoft/DDBOT-WSa/requests"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
@@ -213,7 +213,7 @@ func sendPrivateAlert(qq int64, isRecovery bool) {
 	notify := NewCookieAlertNotify(0, isRecovery)
 	m := notify.ToMessage()
 	sm := m.ToCombineMessage(mmsg.NewPrivateTarget(qq))
-	summary := msgstringer.MsgToString(sm.Elements)
+	summary := msgstringer.AdapterMsgToString(sm.Elements)
 
 	if bot.Instance == nil || !bot.Instance.Online.Load() {
 		logger.WithField("QQ", qq).Warn("Bot 未在线，无法发送私聊告警")

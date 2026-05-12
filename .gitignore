@@ -1,10 +1,8 @@
 /.idea
-Sora233-MiraiGo
 DDBOT
 /.coverage.out
 /coverage.html
 /qrcode.png
-/session.token
 /dist/
 /version*.json
 /debug
@@ -31,6 +29,9 @@ package*.json
 
 # Claude Code configuration
 .claude/
+
+# Playwright MCP runtime data
+.playwright-mcp/
 
 # Runtime data - DO NOT COMMIT
 /res/

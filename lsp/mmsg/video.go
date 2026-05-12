@@ -2,11 +2,12 @@ package mmsg
 
 import (
 	"encoding/base64"
-	"github.com/Mrs4s/MiraiGo/message"
-	"github.com/cnxysoft/DDBOT-WSa/requests"
-	"github.com/cnxysoft/DDBOT-WSa/utils"
 	"os"
 	"strings"
+
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
+	"github.com/cnxysoft/DDBOT-WSa/requests"
+	"github.com/cnxysoft/DDBOT-WSa/utils"
 )
 
 type VideoElement struct {
@@ -74,19 +75,23 @@ func (v *VideoElement) GetFile() string {
 	return v.alternative
 }
 
-func (v *VideoElement) Type() message.ElementType {
+func (v *VideoElement) Type() adapter.ElementType {
 	return Video
 }
 
-func (v *VideoElement) PackToElement(target Target) message.IMessageElement {
-	m := message.NewVideo("")
+func (v *VideoElement) ToSendingMessage() *adapter.SendingMessage {
+	return &adapter.SendingMessage{Elements: []adapter.IMessageElement{v}}
+}
+
+func (v *VideoElement) PackToElement(target Target) adapter.IMessageElement {
+	m := &adapter.VideoSegment{}
 	if v == nil {
-		return message.NewText("[空视频]\n")
+		return &adapter.TextSegment{Content: "[空视频]\n"}
 	} else if v.Url != "" {
 		if strings.HasPrefix(v.Url, "http://") || strings.HasPrefix(v.Url, "https://") {
-			m.File = v.Url
+			m.Url = v.Url
 		} else {
-			m.File = "file://" + strings.ReplaceAll(v.Url, `\`, `\\`)
+			m.Url = "file://" + strings.ReplaceAll(v.Url, `\`, `\\`)
 		}
 		return m
 	} else if v.Buf == nil {
@@ -97,6 +102,6 @@ func (v *VideoElement) PackToElement(target Target) message.IMessageElement {
 	}
 	logger.Debugf("转换base64视频")
 	base64Video := base64.StdEncoding.EncodeToString(v.Buf) // 这里进行转换
-	m.File = "base64://" + base64Video
+	m.Url = "base64://" + base64Video
 	return m
 }

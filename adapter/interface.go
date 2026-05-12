@@ -1,11 +1,9 @@
 package adapter
 
 import (
+	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/Mrs4s/MiraiGo/client"
-	"github.com/Mrs4s/MiraiGo/message"
 )
 
 type MessageType string
@@ -77,7 +75,7 @@ type NoticeEvent struct {
 	SubType      string
 	Title        string
 	MessageID    int64
-	File         client.GroupFile
+	File         GroupFile
 	EmojiId      string
 	EmojiCount   int
 	OperatorNick string
@@ -95,6 +93,25 @@ type RequestEvent struct {
 	Comment     string
 	Flag        string
 	SubType     string
+}
+
+type GroupFile struct {
+	GroupCode     int64  `json:"group_id,omitempty"`
+	FileId        string `json:"file_id,omitempty"`
+	FileName      string `json:"file_name,omitempty"`
+	BusId         int32  `json:"busid,omitempty"`
+	FileSize      int64  `json:"file_size,omitempty"`
+	UploadTime    int64  `json:"upload_time,omitempty"`
+	DeadTime      int64  `json:"dead_time,omitempty"`
+	ModifyTime    int64  `json:"modify_time,omitempty"`
+	DownloadTimes int64  `json:"download_times,omitempty"`
+	Uploader      int64  `json:"uploader,omitempty"`
+	UploaderName  string `json:"uploader_name,omitempty"`
+	AltFildId     string `json:"id,omitempty"`
+	AltFileSize   int64  `json:"size,omitempty"`
+	AltFileName   string `json:"name,omitempty"`
+	FileUrl       string `json:"file_url,omitempty"`
+	AltFileUrl    string `json:"url,omitempty"`
 }
 
 type MemberPermission int
@@ -283,7 +300,7 @@ type GetMsgResult struct {
 	GroupID    int64
 	UserID     int64
 	RawMessage string
-	Elements   []message.IMessageElement
+	Elements   []IMessageElement
 	Time       int64
 	Sender     *SenderInfo
 }
@@ -295,6 +312,14 @@ type SenderInfo struct {
 	Role     string
 }
 
+// DisplayName returns the display name for the sender.
+func (s *SenderInfo) DisplayName() string {
+	if s.Card != "" {
+		return s.Card
+	}
+	return s.Nickname
+}
+
 // ForwardOptions 合并转发消息的顶层参数
 // 对应 onebot-v11 send_group_forward_msg API 的顶层字段
 type ForwardOptions struct {
@@ -304,15 +329,15 @@ type ForwardOptions struct {
 	News    []string // 转发预览文本列表 (LLOneBot/NapCatQQ 支持)
 }
 
-// ConvertToMessageElements converts []MessageSegment to []message.IMessageElement
-func ConvertToMessageElements(segments []MessageSegment) []message.IMessageElement {
-	var elements []message.IMessageElement
+// ConvertToMessageElements converts []MessageSegment to []adapter.IMessageElement
+func ConvertToMessageElements(segments []MessageSegment) []IMessageElement {
+	var elements []IMessageElement
 
 	for _, seg := range segments {
 		switch seg.Type {
 		case "text":
 			if text, ok := seg.Data["text"].(string); ok {
-				elements = append(elements, &message.TextElement{Content: text})
+				elements = append(elements, &TextSegment{Content: text})
 			}
 		case "at":
 			var target int64
@@ -326,7 +351,7 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				}
 			}
 			if target != 0 || seg.Data["qq"] == "all" {
-				elements = append(elements, &message.AtElement{Target: target})
+				elements = append(elements, &AtSegment{Target: target})
 			}
 		case "face":
 			var faceId int64
@@ -336,17 +361,17 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				faceId, _ = strconv.ParseInt(id, 10, 64)
 			}
 			if faceId != 0 {
-				elements = append(elements, &message.FaceElement{Index: int32(faceId)})
+				elements = append(elements, &FaceSegment{Index: int32(faceId)})
 			}
 		case "image":
-			elements = append(elements, &message.GroupImageElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
+			elements = append(elements, &ImageSegment{
+				Url:  interfaceString(seg.Data["url"]),
+				File: interfaceString(seg.Data["file"]),
 			})
 		case "record":
-			elements = append(elements, &message.VoiceElement{
-				Url:  getString(seg.Data["url"]),
-				Name: getString(seg.Data["file"]),
+			elements = append(elements, &VoiceSegment{
+				Url:  interfaceString(seg.Data["url"]),
+				Name: interfaceString(seg.Data["file"]),
 			})
 		case "reply":
 			var replySeq int64
@@ -356,21 +381,21 @@ func ConvertToMessageElements(segments []MessageSegment) []message.IMessageEleme
 				replySeq, _ = strconv.ParseInt(id, 10, 64)
 			}
 			if replySeq != 0 {
-				elements = append(elements, &message.ReplyElement{ReplySeq: int32(replySeq)})
+				elements = append(elements, &ReplySegment{ReplySeq: int32(replySeq)})
 			}
 		case "json":
 			if data, ok := seg.Data["data"].(string); ok {
-				elements = append(elements, &message.LightAppElement{Content: data})
+				elements = append(elements, &JsonSegment{Content: data})
 			}
 		case "forward":
 			if id, ok := seg.Data["id"].(string); ok {
-				elements = append(elements, &message.ForwardElement{ResId: id})
+				elements = append(elements, &ForwardSegment{ResId: id})
 			}
 		case "file":
-			elements = append(elements, &message.GroupFileElement{
-				Name: getString(seg.Data["name"]),
-				Id:   getString(seg.Data["id"]),
-				Url:  getString(seg.Data["url"]),
+			elements = append(elements, &FileSegment{
+				Name: interfaceString(seg.Data["name"]),
+				Id:   interfaceString(seg.Data["id"]),
+				Url:  interfaceString(seg.Data["url"]),
 			})
 		}
 	}
@@ -405,6 +430,23 @@ func ParseMessageSegments(msg interface{}) []MessageSegment {
 	}
 
 	return segments
+}
+
+func interfaceString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case float64:
+		return strconv.FormatFloat(val, 'f', -1, 64)
+	case int64:
+		return strconv.FormatInt(val, 10)
+	case int:
+		return strconv.Itoa(val)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprintf("%v", val)
+	}
 }
 
 func BuildMessageParams(message interface{}) map[string]interface{} {

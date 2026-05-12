@@ -4,8 +4,6 @@ go 1.26.2
 
 replace github.com/Sora233/MiraiGo-Template => ./bot
 
-replace github.com/Mrs4s/MiraiGo => ./miraigo
-
 replace github.com/cnxysoft/DDBOT-WSa/lsp/eventbus => ./lsp/eventbus
 
 replace github.com/cnxysoft/DDBOT-WSa/adapter => ./adapter
@@ -18,7 +16,6 @@ replace github.com/cnxysoft/DDBOT-WSa/utils/qqlog => ./utils/qqlog
 
 require (
 	github.com/Jeffail/gabs/v2 v2.7.0
-	github.com/Mrs4s/MiraiGo v0.0.0-20230627090859-19e3d172596e
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/Sora233/MiraiGo-Template v0.0.0-20250614161613-2c6ee7380548
 	github.com/Sora233/sliceutil v0.0.0-20210120043858-459badd8d882
@@ -64,7 +61,6 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/sagikazarmark/locafero v0.10.0 // indirect
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
-	golang.org/x/image v0.30.0 // indirect
 	golang.org/x/net v0.45.0
 )
 
@@ -75,7 +71,6 @@ require (
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/bytedance/sonic v1.9.2 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
-	github.com/fumiama/imgsz v0.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
@@ -92,7 +87,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/afero v1.14.0 // indirect
@@ -111,7 +105,6 @@ require (
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.29.0
-	gopkg.ilharper.com/x/isatty v1.1.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

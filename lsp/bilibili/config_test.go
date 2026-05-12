@@ -2,13 +2,14 @@ package bilibili
 
 import (
 	"fmt"
-	"github.com/Mrs4s/MiraiGo/message"
+	"strconv"
+	"testing"
+
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/stretchr/testify/assert"
-	"strconv"
-	"testing"
 )
 
 func newLiveInfo(uid int64, living bool, liveStatusChanged bool, liveTitleChanged bool) *ConcernLiveNotify {
@@ -356,11 +357,11 @@ func TestGroupConcernConfig_NotifyAfterCallback(t *testing.T) {
 
 	var notify = newNewsInfo(test.UID1, DynamicDescType_WithOrigin)[0]
 	notify.compactKey = test.BVID1
-	var msg = &message.GroupMessage{
-		Id:        1,
+	var msg = &adapter.GroupMessage{
+		ID:        1,
 		GroupCode: test.G1,
-		Elements: []message.IMessageElement{
-			message.NewText("asd"),
+		Elements: []adapter.IMessageElement{
+			&adapter.TextSegment{Content: "asd"},
 		},
 	}
 	var g = new(GroupConcernConfig)

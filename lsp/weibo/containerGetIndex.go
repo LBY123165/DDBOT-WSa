@@ -2,6 +2,7 @@ package weibo
 
 import (
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -35,8 +36,9 @@ func ApiContainerGetIndexProfile(uid int64) (*ApiContainerGetIndexProfileRespons
 }
 
 func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileResponse, error) {
+	cookieOpts := CookieOption()
 	opts := buildRequestOptions(CreateReferer(uid))
-	opts = append(opts, CookieOption()...)
+	opts = append(opts, cookieOpts...)
 	opts = append(opts, SetXsrfToken(opts))
 
 	profileResp := new(ApiContainerGetIndexProfileResponse)
@@ -51,6 +53,7 @@ func apiContainerGetIndexProfileLogin(uid int64) (*ApiContainerGetIndexProfileRe
 func apiContainerGetIndexProfileGuest(uid int64) (*ApiContainerGetIndexProfileResponse, error) {
 	opts := buildRequestOptions(CreateGuestReferer(uid))
 	opts = append(opts, CookieOption()...)
+	GetUserPage(uid, opts...)
 
 	guestResp := new(apiContainerGetIndexGuestProfileResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestProfileParam(uid), &guestResp, opts...)
@@ -170,9 +173,13 @@ func apiContainerGetIndexCardsAPI(uid int64) (*ApiContainerGetIndexCardsResponse
 func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsResponse, error) {
 	// Guest 模式：使用自动生成的访客 Cookie
 	cookieOpts := CookieOption()
+	if len(cookieOpts) == 0 {
+		logger.Warnf("uid=%d: 移动端 CookieOption 为空", uid)
+	}
 
 	opts := buildRequestOptions(CreateGuestReferer(uid))
 	opts = append(opts, cookieOpts...)
+	GetUserPage(uid, opts...)
 
 	guestResp := new(apiContainerGetIndexGuestCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
@@ -183,16 +190,30 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 
 	resp := guestResp.ToCardsResponse()
 
-	// 如果是 Guest 模式且返回 -100 错误，尝试刷新 Cookie 并重试一次
-	if !cfg.IsWeiboAPIMode() && resp.GetOk() == -100 {
-		logger.Warnf("uid=%d: 检测到 -100 错误（Cookie 失效），尝试刷新", uid)
-		if TryRefreshGuestCookie() {
+	// Guest 模式：处理错误码
+	if !cfg.IsWeiboAPIMode() {
+		if resp.GetOk() == -100 {
+			// -100: 频率限制触发，暂停刷新 10 分钟
+			logger.Warnf("uid=%d: 检测到 -100 错误（频率限制），暂停刷新 Cookie 10 分钟", uid)
+			PauseRefreshOnRateLimit(time.Minute * 10)
+			return resp, nil
+		}
+		if resp.GetOk() == 432 {
+			// 432: 需要人机验证，正常刷新 Cookie
+			logger.Warnf("uid=%d: 检测到 432 错误（人机验证），尝试刷新", uid)
+			if !TryRefreshGuestCookie() {
+				cookieHealthy.Store(false)
+				consecutiveCookieFails.Inc()
+				return resp, nil
+			}
 			// 刷新成功后重试一次
+			// 随机延迟 1-3s，避免固定间隔被检测
+			time.Sleep(time.Duration(1000+rand.Intn(2000)) * time.Millisecond)
 			cookieOpts = CookieOption()
 			opts = buildRequestOptions(CreateGuestReferer(uid))
 			opts = append(opts, cookieOpts...)
-
-			guestResp = new(apiContainerGetIndexGuestCardsResponse)
+			GetUserPage(uid, opts...)
+			guestResp := new(apiContainerGetIndexGuestCardsResponse)
 			err = requests.Get(PathContainerGetIndex_Guest, CreateGuestCardsParam(uid), &guestResp, opts...)
 			if err != nil {
 				markCookieUnhealthy(err)
@@ -201,14 +222,13 @@ func apiContainerGetIndexCardsGuest(uid int64) (*ApiContainerGetIndexCardsRespon
 			resp = guestResp.ToCardsResponse()
 		}
 	}
-
 	return resp, nil
 }
 
 func buildRequestOptions(referer string) []requests.Option {
 	return []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferNone),
-		requests.AddUAOption(),
+		requests.AddUAOption(GetVisitorUA()),
 		requests.TimeoutOption(time.Second * 10),
 		requests.HeaderOption("referer", referer),
 	}
@@ -287,12 +307,16 @@ func CreateParam(uid int64) gout.H {
 func CreateGuestProfileParam(uid int64) gout.H {
 	return gout.H{
 		"containerid": "100505" + strconv.FormatInt(uid, 10),
+		"type":        "uid",
+		"value":       strconv.FormatInt(uid, 10),
 	}
 }
 
 func CreateGuestCardsParam(uid int64) gout.H {
 	return gout.H{
 		"containerid": "107603" + strconv.FormatInt(uid, 10),
+		"type":        "uid",
+		"value":       strconv.FormatInt(uid, 10),
 	}
 }
 
@@ -328,4 +352,8 @@ func isCookieFailure(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "invalid character '<'") ||
 		strings.Contains(msg, "looking for beginning of value")
+}
+
+func GetUserPage(id int64, Opts ...requests.Option) error {
+	return requests.Get(CreateGuestReferer(id), nil, nil, Opts...)
 }

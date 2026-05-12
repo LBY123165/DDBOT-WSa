@@ -11,7 +11,7 @@ DDBOT-WSa 是基于 DDBOT-ws 的修改版本，目的是恢复DDBOT的原有功�
 
 **目前已经修复所有的主要指令（奇奇怪怪的指令没测试）。**
 
-DDBOT是一个基于 [MiraiGO](https://github.com/Mrs4s/MiraiGo) 的QQ群推送框架， 内置支持b站直播/动态，斗鱼直播，YTB直播/预约直播，虎牙直播，ACFUN直播，微博动态，
+DDBOT是一个通过 WebSocket 连接 OneBot 兼容平台的QQ群推送框架，内置支持b站直播/动态，斗鱼直播，YTB直播/预约直播，虎牙直播，ACFUN直播，微博动态，
 也可以通过插件支持任何订阅源。
 
 *DDBOT不是一个聊天机器人。*
@@ -156,8 +156,6 @@ DDBOT已实现消息模板功能，一些内置命令和推送可通过模板自
 ## 注意事项
 
 - **bot只在群聊内工作，但命令可以私聊使用，以避免在群内刷屏**（少数次要娱乐命令暂不支持，详细列表请看用法指南）
-- **建议bot秘密码设置足够强，同时不建议把bot设置为QQ群管理员，因为存在密码被恶意爆破的可能（包括但不限于盗号、广告等）**
-- **您应当知道，bot账号可以人工登陆，请注意个人隐私**
 - bot掉线无法重连时将自动退出，请自行实现保活机制
 - bot使用 [buntdb](https://github.com/tidwall/buntdb) 作为embed database，会在当前目录生成文件`.lsp.db`
   ，删除该文件将导致bot恢复出厂设置，可以使用 [buntdb-cli](https://github.com/Sora233/buntdb-cli) 作为运维工具，但注意不要在bot运行的时候使用（buntdb不支持多写）

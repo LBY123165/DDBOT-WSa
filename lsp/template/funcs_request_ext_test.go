@@ -31,18 +31,18 @@ func TestReplaceAvifWithPng(t *testing.T) {
 }
 
 func TestParseBiliPostContent_MissingElements(t *testing.T) {
-	opts := []requests.Option{
-		requests.AddUAOption(),
-		requests.ProxyOption(proxy_pool.PreferNone),
-		requests.RetryOption(3),
-	}
-	var body strings.Builder
-	err := requests.Get("https://www.bilibili.com/opus/1180763965117956099", nil, &body, opts...)
-	if err != nil {
-		t.Skipf("skipping test: failed to fetch page: %v", err)
-	}
-
-	elements := parseBiliPostContent([]byte(body.String()))
+	html := `<html><head><script>
+		window.__INITIAL_STATE__={"module_collection":{"count":"1篇"},"collection_id":12345};
+		</script></head><body><div class="opus-module-content">
+		<div class="opus-para-link-card">
+			<a href="https://www.bilibili.com/opus/1">
+				<span class="opus-tag tag-dynamic">动态</span>
+				<span class="opus-title">关联动态</span>
+				<div class="opus-cover"><img src="//i0.hdslb.com/bfs/new_dyn/link.png@128w_128h_1c"/></div>
+			</a>
+		</div>
+		</div></body></html>`
+	elements := parseBiliPostContent([]byte(html))
 
 	var types []string
 	for _, e := range elements {

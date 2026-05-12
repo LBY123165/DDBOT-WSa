@@ -1,7 +1,7 @@
 package lsp
 
 import (
-	"github.com/Mrs4s/MiraiGo/message"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	"github.com/cnxysoft/DDBOT-WSa/internal/test"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern_type"
@@ -33,7 +33,7 @@ func TestLsp_ConcernNotify(t *testing.T) {
 	target := mmsg.NewGroupTarget(test.G1)
 	ctx := NewCtx(t, msgChan, test.Sender1, target)
 
-	err := Instance.PermissionStateManager.GrantRole(test.Sender1.Uin, permission.Admin)
+	err := Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
 	assert.Nil(t, err)
 
 	tc1 := newTestConcern(t, testEventChan, testNotifyChan, test.Site1, []concern_type.Type{test.T1})
@@ -42,11 +42,11 @@ func TestLsp_ConcernNotify(t *testing.T) {
 
 	IWatch(ctx, test.G1, test.NAME1, test.Site1, test.T1, false)
 	result = <-msgChan
-	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), success)
+	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
 
 	IWatch(ctx, test.G2, test.NAME1, test.Site1, test.T1, false)
 	result = <-msgChan
-	assert.Contains(t, msgstringer.MsgToString(result.ToCombineMessage(target).Elements), success)
+	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
 
 	testEventChan <- tc1.NewTestEvent(test.T1, 0, test.NAME1)
 
@@ -61,11 +61,15 @@ func TestNewAtAllMsg(t *testing.T) {
 	var msg = mmsg.NewMSG()
 	newAtAllMsg(msg)
 	assert.NotNil(t, msg)
-	e := msg.ToCombineMessage(mmsg.NewGroupTarget(test.G1)).FirstOrNil(func(e message.IMessageElement) bool {
-		return e.Type() == message.At
-	})
+	var e adapter.IMessageElement
+	for _, elem := range msg.Elements() {
+		if _, ok := elem.(*mmsg.AtElement); ok {
+			e = elem
+			break
+		}
+	}
 	assert.NotNil(t, e)
-	assert.EqualValues(t, 0, e.(*message.AtElement).Target)
+	assert.EqualValues(t, 0, e.(*mmsg.AtElement).Target)
 }
 
 func TestNewAtIdsMsg(t *testing.T) {

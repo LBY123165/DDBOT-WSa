@@ -71,23 +71,6 @@ func SetUpLog() {
 
 // Run 启动 bot，这个函数会阻塞直到收到退出信号
 func Run() {
-	if fi, err := os.Stat("device.json"); err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("警告：没有检测到 device.json，正在生成，如果是第一次运行，可忽略")
-			bot.GenRandomDevice()
-		} else {
-			warn.Warn(fmt.Sprintf("检查 device.json 文件失败 - %v", err))
-			os.Exit(1)
-		}
-	} else {
-		if fi.IsDir() {
-			warn.Warn("检测到 device.json，但目标是一个文件夹！请手动确认并删除该文件夹！")
-			os.Exit(1)
-		} else {
-			fmt.Println("检测到 device.json，使用存在的 device.json")
-		}
-	}
-
 	if fi, err := os.Stat("application.yaml"); err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("警告：没有检测到配置文件 application.yaml，正在生成，如果是第一次运行，可忽略")
@@ -146,9 +129,6 @@ func Run() {
 	bot.StartService()
 
 	_, _ = admin.Start(&bot.Instance.Online, nil)
-
-	// 登录 跳过登录
-	//bot.Login()
 
 	// 刷新好友列表，群列表
 	//以后刷新
@@ -279,6 +259,11 @@ weibo:
   # API 模式直接从外部 API 获取微博数据，无需 Cookie
   # API 返回的数据格式需与微博移动端 API 兼容
   apiModeBaseURL: "http://127.0.0.1:5000"  # API 模式基础地址，完整 URL 为 {baseURL}/api/Weibo/GetMobileCards?uid=uid
+
+  # SnapCast 服务地址，用于访客模式生成 rid
+  # 如果留空则使用默认地址 https://sc.znin.net/render
+  # 可配置为自建的 SnapCast 服务地址
+  snapcastURL: ""
 
 youtube:
   onlyOnlineNotify: true  # 是否不推送 Bot 离线期间的动态和直播，默认为 false 表示需要推送，设置为 true 表示不推送

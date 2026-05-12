@@ -18,6 +18,7 @@ const (
 
 var (
 	visitorCookiesOpt atomic.Value
+	visitorUA         atomic.String
 
 	// cookieHealthy 标记当前 Cookie 是否健康可用
 	cookieHealthy atomic.Bool
@@ -37,4 +38,11 @@ func CookieOption() []requests.Option {
 // IsCookieHealthy 返回当前 Cookie 是否健康
 func IsCookieHealthy() bool {
 	return cookieHealthy.Load()
+}
+
+func GetVisitorUA() string {
+	if ua := visitorUA.Load(); ua != "" {
+		return ua
+	}
+	return requests.DefaultUA()
 }
