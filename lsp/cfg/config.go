@@ -191,6 +191,10 @@ func GetAcfunOnlyOnlineNotify() bool {
 	return config.GlobalConfig.GetBool("acfun.onlyOnlineNotify")
 }
 
+func GetXHSOnlyOnlineNotify() bool {
+	return config.GlobalConfig.GetBool("xhs.onlyOnlineNotify")
+}
+
 func GetTwitchOnlyOnlineNotify() bool {
 	return config.GlobalConfig.GetBool("twitch.onlyOnlineNotify")
 }

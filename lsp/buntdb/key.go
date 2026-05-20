@@ -194,6 +194,32 @@ func XHHSmidV2Key(keys ...interface{}) string {
 func XHHSmidV2GenerateTimeKey(keys ...interface{}) string {
 	return NamedKey("XHHSmidV2GenerateTime", keys)
 }
+
+// XHS keys for Xiaohongshu live streaming
+func XHSGroupConcernStateKey(keys ...interface{}) string {
+	return NamedKey("XHSConcernState", keys)
+}
+func XHSGroupConcernConfigKey(keys ...interface{}) string {
+	return NamedKey("XHSConcernConfig", keys)
+}
+func XHSFreshKey(keys ...interface{}) string {
+	return NamedKey("XHSFresh", keys)
+}
+func XHSGroupAtAllMarkKey(keys ...interface{}) string {
+	return NamedKey("XHSGroupAtAll", keys)
+}
+func XHSCurrentLiveKey(keys ...interface{}) string {
+	return NamedKey("XHSCurrentLive", keys)
+}
+func XHSNewsInfoKey(keys ...interface{}) string {
+	return NamedKey("XHSNewsInfo", keys)
+}
+func XHSMarkNoteIdKey(keys ...interface{}) string {
+	return NamedKey("XHSMarkNoteId", keys)
+}
+func XHSUserInfoKey(keys ...interface{}) string {
+	return NamedKey("XHSUserInfo", keys)
+}
 func WeiboCookieAlertKey(keys ...interface{}) string {
 	return NamedKey("WeiboCookieAlert", keys)
 }

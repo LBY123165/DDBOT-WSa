@@ -33,6 +33,7 @@ import (
 	_ "github.com/cnxysoft/DDBOT-WSa/lsp/twitch"
 	_ "github.com/cnxysoft/DDBOT-WSa/lsp/weibo"
 	_ "github.com/cnxysoft/DDBOT-WSa/lsp/xhh"
+	_ "github.com/cnxysoft/DDBOT-WSa/lsp/xhs"
 	_ "github.com/cnxysoft/DDBOT-WSa/lsp/youtube"
 	_ "github.com/cnxysoft/DDBOT-WSa/msg-marker"
 )
@@ -267,6 +268,16 @@ weibo:
 
 youtube:
   onlyOnlineNotify: true  # 是否不推送 Bot 离线期间的动态和直播，默认为 false 表示需要推送，设置为 true 表示不推送
+
+# 小红书直播推送
+# 需要配置 cookies 才能获取用户房间信息
+xhs:
+  cookies:  # 支持完整 cookie 字典
+    a1: ""   # 小红书 a1 cookie（必需）
+    web_session: ""  # 可选
+    webId: ""  # 可选
+  interval: 15s  # 轮询间隔
+  onlyOnlineNotify: false
 
 # Twitch 直播推送
 # 需要在 https://dev.twitch.tv/console/apps 注册应用获取 clientId 和 clientSecret
