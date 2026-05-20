@@ -513,7 +513,7 @@ func IConfigAtCmd(c *MessageContext, groupCode int64, id string, site string, ct
 		c.TextReply(err.Error())
 	} else {
 		if action != "show" {
-			ReplyUserInfo(c, id, site, ctype)
+			ReplyUserInfo(c, groupCode, id, site, ctype)
 		}
 	}
 }
@@ -526,7 +526,7 @@ func IConfigAtAllCmd(c *MessageContext, groupCode int64, id string, site string,
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -538,7 +538,7 @@ func IConfigTitleNotifyCmd(c *MessageContext, groupCode int64, id string, site s
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -550,7 +550,7 @@ func IConfigOfflineNotifyCmd(c *MessageContext, groupCode int64, id string, site
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -562,7 +562,7 @@ func IConfigExtendNotifyCmd(c *MessageContext, groupCode int64, id string, site 
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -585,7 +585,7 @@ func IConfigFilterCmdType(c *MessageContext, groupCode int64, id string, site st
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -609,7 +609,7 @@ func IConfigFilterCmdNotType(c *MessageContext, groupCode int64, id string, site
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -632,7 +632,7 @@ func IConfigFilterCmdText(c *MessageContext, groupCode int64, id string, site st
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -655,7 +655,7 @@ func IConfigFilterCmdNotText(c *MessageContext, groupCode int64, id string, site
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -670,7 +670,7 @@ func IConfigFilterCmdClear(c *MessageContext, groupCode int64, id string, site s
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -731,7 +731,7 @@ func IConfigFilterCmdShow(c *MessageContext, groupCode int64, id string, site st
 	if err != nil {
 		c.TextReply(err.Error())
 	} else {
-		ReplyUserInfo(c, id, site, ctype)
+		ReplyUserInfo(c, groupCode, id, site, ctype)
 	}
 }
 
@@ -748,7 +748,7 @@ func iConfigCmd(c *MessageContext, groupCode int64, id string, site string, ctyp
 		c.TextReply(fmt.Sprintf("失败 - %v", err))
 		return
 	}
-	mid, err := cm.ParseId(id)
+	mid, err := resolveSubscribedCommandID(cm, groupCode, id, ctype)
 	if err != nil {
 		return fmt.Errorf("%v解析Id失败 - %v", cm.Site(), err)
 	}
@@ -765,14 +765,30 @@ func iConfigCmd(c *MessageContext, groupCode int64, id string, site string, ctyp
 	return
 }
 
-func ReplyUserInfo(c *MessageContext, id string, site string, ctype concern_type.Type) {
+func resolveSubscribedCommandID(cm concern.Concern, groupCode int64, id string, ctype concern_type.Type) (interface{}, error) {
+	if resolver, ok := cm.(concern.LocalSubscribedIDResolver); ok {
+		return resolver.ResolveSubscribedID(groupCode, id, ctype)
+	}
+	return cm.ParseId(id)
+}
+
+func resolveReplyUserInfoID(cm concern.Concern, groupCode int64, id string, ctype concern_type.Type) (interface{}, error) {
+	if resolver, ok := cm.(concern.LocalSubscribedIDResolver); ok {
+		if mid, err := resolver.ResolveSubscribedID(groupCode, id, ctype); err == nil {
+			return mid, nil
+		}
+	}
+	return cm.ParseId(id)
+}
+
+func ReplyUserInfo(c *MessageContext, groupCode int64, id string, site string, ctype concern_type.Type) {
 	cm, err := concern.GetConcernBySiteAndType(site, ctype)
 	if err != nil {
 		c.GetLog().Errorf("GetConcernManager error %v", err)
 		c.TextReply(fmt.Sprintf("失败 - %v", err))
 		return
 	}
-	mid, err := cm.ParseId(id)
+	mid, err := resolveReplyUserInfoID(cm, groupCode, id, ctype)
 	if err != nil {
 		c.Log.Errorf("ReplyUserInfo %v got wrong id %v", site, id)
 		c.TextReply(fmt.Sprintf("成功 - %v用户", site))

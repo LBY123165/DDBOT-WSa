@@ -58,6 +58,10 @@ type Concern interface {
 }
 
 // IdentityInfo 表示订阅对象的信息，包括名字，ID
+type LocalSubscribedIDResolver interface {
+	ResolveSubscribedID(groupCode int64, rawID string, ctype concern_type.Type) (interface{}, error)
+}
+
 type IdentityInfo interface {
 	// GetUid 返回订阅对象的id
 	GetUid() interface{}

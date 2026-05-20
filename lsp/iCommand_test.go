@@ -102,6 +102,20 @@ func newTestConcern(t *testing.T, e chan concern.Event, n chan<- concern.Notify,
 	return c
 }
 
+type resolverTestConcern struct {
+	*tc.TestConcern
+	expectedGroupCode int64
+	resolveCalls      []int64
+}
+
+func (r *resolverTestConcern) ResolveSubscribedID(groupCode int64, rawID string, ctype concern_type.Type) (interface{}, error) {
+	r.resolveCalls = append(r.resolveCalls, groupCode)
+	if groupCode != r.expectedGroupCode {
+		return nil, fmt.Errorf("unexpected group code %d", groupCode)
+	}
+	return rawID, nil
+}
+
 func TestIList(t *testing.T) {
 	initLsp(t)
 	defer closeLsp(t)
@@ -765,6 +779,38 @@ func TestIConfigOfflineNotifyCmd(t *testing.T) {
 	IConfigOfflineNotifyCmd(ctx, test.G1, test.NAME1, test.Site1, test.T1, false)
 	result = <-msgChan
 	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), failed)
+}
+
+func TestIConfigOfflineNotifyCmdReplyUsesExplicitGroupCode(t *testing.T) {
+	initLsp(t)
+	defer closeLsp(t)
+
+	testEventChan := make(chan concern.Event, 16)
+	testNotifyChan := make(chan concern.Notify, 1)
+	defer close(testNotifyChan)
+
+	msgChan := make(chan *mmsg.MSG, 10)
+	target := mmsg.NewPrivateTarget(test.Sender1.UserID)
+	ctx := NewCtx(t, msgChan, test.Sender1, target)
+
+	tc1 := &resolverTestConcern{
+		TestConcern:       newTestConcern(t, testEventChan, testNotifyChan, "reply-scope", []concern_type.Type{test.T1}),
+		expectedGroupCode: test.G1,
+	}
+	concern.RegisterConcern(tc1)
+	defer tc1.Stop()
+
+	err := Instance.PermissionStateManager.GrantRole(test.Sender1.UserID, permission.Admin)
+	assert.Nil(t, err)
+
+	IWatch(ctx, test.G1, test.NAME1, "reply-scope", test.T1, false)
+	<-msgChan
+	tc1.resolveCalls = nil
+
+	IConfigOfflineNotifyCmd(ctx, test.G1, test.NAME1, "reply-scope", test.T1, true)
+	result := <-msgChan
+	assert.Contains(t, msgstringer.AdapterMsgToString(result.ToCombineMessage(target).Elements), success)
+	assert.Equal(t, []int64{test.G1, test.G1}, tc1.resolveCalls)
 }
 
 func TestIConfigFilterCmd(t *testing.T) {
