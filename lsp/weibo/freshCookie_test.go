@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/cnxysoft/DDBOT-WSa/requests"
-	"github.com/stretchr/testify/assert"
 )
 
 // TestFreshCookie tests the FreshCookieGuest function - requires external network access
