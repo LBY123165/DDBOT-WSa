@@ -495,9 +495,9 @@ func findVideoForMix(Item []*Card_MixMediaInfo_Items, m *mmsg.MSG) {
 
 // CookieAlertNotify Cookie 失效时的告警通知
 type CookieAlertNotify struct {
-	GroupCode   int64
-	Message     string
-	IsRecovery  bool
+	GroupCode  int64
+	Message    string
+	IsRecovery bool
 }
 
 func (n *CookieAlertNotify) Site() string {
@@ -545,5 +545,51 @@ func NewCookieAlertNotify(groupCode int64, isRecovery bool) *CookieAlertNotify {
 		GroupCode:  groupCode,
 		Message:    msg,
 		IsRecovery: isRecovery,
+	}
+}
+
+// SUBExpiredNotify SUB 过期告警通知
+type SUBExpiredNotify struct {
+	GroupCode int64
+}
+
+func (n *SUBExpiredNotify) Site() string {
+	return Site
+}
+
+func (n *SUBExpiredNotify) Type() concern_type.Type {
+	return CookieAlert
+}
+
+func (n *SUBExpiredNotify) GetUid() interface{} {
+	return int64(0)
+}
+
+func (n *SUBExpiredNotify) GetGroupCode() int64 {
+	return n.GroupCode
+}
+
+func (n *SUBExpiredNotify) Logger() *logrus.Entry {
+	return logger.WithFields(logrus.Fields{
+		"Site":      Site,
+		"GroupCode": n.GroupCode,
+	})
+}
+
+func (n *SUBExpiredNotify) ToMessage() *mmsg.MSG {
+	m := mmsg.NewMSG()
+	m.Textf("[微博SUB过期告警]")
+	m.Textf("\n⚠ 检测到微博 SUB（登录凭证）可能已过期")
+	m.Textf("\n微博订阅推送可能无法正常工作")
+	m.Textf("\n请管理员手动重新登录获取新的 SUB")
+	m.Textf("\n可通过以下方式获取：")
+	m.Textf("\n1. 启用 weibo.qrlogin 扫码登录")
+	m.Textf("\n2. 手动配置 weibo.sub")
+	return m
+}
+
+func NewSUBExpiredNotify(groupCode int64) *SUBExpiredNotify {
+	return &SUBExpiredNotify{
+		GroupCode: groupCode,
 	}
 }

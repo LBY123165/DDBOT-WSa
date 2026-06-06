@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool"
 	"github.com/cnxysoft/DDBOT-WSa/requests"
 	jsoniter "github.com/json-iterator/go"
@@ -127,9 +128,11 @@ func Init() {
 					}
 					config.GlobalConfig.Set("bilibili.SESSDATA", cookies.SESSDATA)
 					config.GlobalConfig.Set("bilibili.bili_jct", cookies.BILI_JCT)
-					if err := config.GlobalConfig.WriteConfig(); err != nil {
-						logger.Errorf("保存配置文件失败 - %v", err)
-						continue
+					if err := cfg.WriteConfigKeyValue("bilibili.SESSDATA", cookies.SESSDATA); err != nil {
+						logger.Errorf("保存 SESSDATA 到配置文件失败 - %v", err)
+					}
+					if err := cfg.WriteConfigKeyValue("bilibili.bili_jct", cookies.BILI_JCT); err != nil {
+						logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
 					}
 					SetVerify(cookies.SESSDATA, cookies.BILI_JCT)
 					FreshSelfInfo()

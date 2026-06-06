@@ -223,6 +223,9 @@ func XHSUserInfoKey(keys ...interface{}) string {
 func WeiboCookieAlertKey(keys ...interface{}) string {
 	return NamedKey("WeiboCookieAlert", keys)
 }
+func WeiboSUBExpiredAlertKey(keys ...interface{}) string {
+	return NamedKey("WeiboSUBExpiredAlert", keys)
+}
 func TwitterUserInfoKey(keys ...interface{}) string {
 	return NamedKey("TwitterUserInfo", keys)
 }

@@ -744,10 +744,13 @@ func (lgc *LspGroupCommand) ConfigCommand() {
 				Id string `arg:"" help:"配置的主播id"`
 			} `cmd:"" help:"查看当前过滤器" name:"show" group:"filter"`
 		} `cmd:"" help:"配置动态过滤器" name:"filter"`
+		WeiboAlert struct {
+			Action string `arg:"" optional:"" default:"show" enum:"show,true,false,1,0,on,off,enable,disable" help:"show=查看, true/false=群内开关"`
+		} `cmd:"" help:"配置本群是否接收微博Cookie/SUB告警通知" name:"weibo_alert"`
 	}
 
 	kongCtx, output := lgc.parseCommandSyntax(&configCmd, lgc.CommandName(),
-		kong.Description("管理BOT的配置，目前支持配置@成员、@全体成员、开启下播推送、开启标题推送、推送过滤"),
+		kong.Description("管理BOT的配置，目前支持配置@成员、@全体成员、开启下播推送、开启标题推送、推送过滤、微博告警"),
 	)
 	if output != "" {
 		lgc.textReply(output)
@@ -836,9 +839,177 @@ func (lgc *LspGroupCommand) ConfigCommand() {
 			log.WithField("filter_cmd", filterCmd).Errorf("unknown filter command")
 			lgc.textSend("未知的filter子命令")
 		}
+	case "weibo_alert":
+		lgc.ConfigWeiboAlertCommand(configCmd.WeiboAlert.Action)
 	default:
 		lgc.textSend("暂未支持，你可以催作者GKD")
 	}
+}
+
+// ConfigWeiboAlertCommand 配置微博告警通知发送对象
+// 群内使用：/config weibo_alert true|false|show 控制该群是否接收告警
+func (lgc *LspGroupCommand) ConfigWeiboAlertCommand(action string) {
+	log := lgc.DefaultLoggerWithCommand("config weibo_alert")
+	log.Infof("run config weibo_alert command")
+	defer func() { log.Infof("config weibo_alert command end") }()
+
+	// 需要管理员权限
+	if !lgc.l.PermissionStateManager.RequireAny(
+		permission.AdminRoleRequireOption(lgc.uin()),
+	) {
+		lgc.textReply("权限不足 - 需要管理员权限")
+		return
+	}
+
+	groupCode := lgc.groupCode()
+
+	if groupCode > 0 {
+		// 群内使用：切换该群的告警开关
+		lgc.configWeiboAlertGroup(action, groupCode)
+	} else {
+		// 私聊使用 show 时，显示当前设置
+		lgc.configWeiboAlertPrivate(action, 0, 0)
+	}
+}
+
+// configWeiboAlertGroup 群内配置微博告警开关
+func (lgc *LspGroupCommand) configWeiboAlertGroup(action string, groupCode int64) {
+	switch action {
+	case "true", "1", "on", "enable":
+		if err := weibo.EnableAlertGroup(groupCode); err != nil {
+			lgc.textReply("启用失败")
+			return
+		}
+		lgc.textReply(fmt.Sprintf("已为本群（%d）启用微博 Cookie/SUB 告警通知", groupCode))
+
+	case "false", "0", "off", "disable":
+		if err := weibo.DisableAlertGroup(groupCode); err != nil {
+			lgc.textReply("禁用失败")
+			return
+		}
+		lgc.textReply(fmt.Sprintf("已为本群（%d）禁用微博 Cookie/SUB 告警通知", groupCode))
+
+	case "show":
+		enabled := weibo.IsAlertGroupEnabled(groupCode)
+		if enabled {
+			lgc.textReply(fmt.Sprintf("本群（%d）已启用微博 Cookie/SUB 告警通知", groupCode))
+		} else {
+			lgc.textReply(fmt.Sprintf("本群（%d）未启用微博 Cookie/SUB 告警通知\n发送 /config weibo_alert true 可开启", groupCode))
+		}
+
+	default:
+		lgc.textReply("群内用法：/config weibo_alert true|false|show\ntrue=开启本群告警, false=关闭本群告警, show=查看状态")
+	}
+}
+
+// configWeiboAlertPrivate 私聊配置微博告警目标
+func (lgc *LspGroupCommand) configWeiboAlertPrivate(action string, group, qq int64) {
+	handleWeiboAlertPrivate(func(s string) { lgc.textReply(s) }, action, group, qq)
+}
+
+// handleWeiboAlertPrivate 私聊配置微博告警目标（独立函数，供群聊和私聊命令共用）
+func handleWeiboAlertPrivate(reply func(string), action string, group, qq int64) {
+	key := localdb.Key("WeiboAlertTarget")
+
+	switch action {
+	case "show":
+		var lines []string
+		lines = append(lines, "=== 微博告警推送目标 ===")
+
+		// 管理员私聊（默认）
+		admins := weibo.GetBotAdmins()
+		if len(admins) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "【私聊 - 管理员】")
+			for _, qq := range admins {
+				lines = append(lines, fmt.Sprintf("  QQ %d", qq))
+			}
+		} else {
+			lines = append(lines, "")
+			lines = append(lines, "【私聊 - 管理员】（无）")
+		}
+
+		// 已启用告警的群
+		alertGroups := weibo.GetEnabledAlertGroups()
+		if len(alertGroups) > 0 {
+			lines = append(lines, "")
+			lines = append(lines, "【群聊 - 已启用告警】")
+			for _, gc := range alertGroups {
+				lines = append(lines, fmt.Sprintf("  群 %d", gc))
+			}
+		} else {
+			lines = append(lines, "")
+			lines = append(lines, "【群聊 - 已启用告警】（无）")
+		}
+
+		// 自定义目标
+		val, err := localdb.Get(key)
+		if err == nil {
+			lines = append(lines, "")
+			lines = append(lines, fmt.Sprintf("【自定义目标】%s", formatAlertTarget(val)))
+		}
+
+		lines = append(lines, "")
+		lines = append(lines, "在群内发送 /config weibo_alert true 可为该群启用告警")
+		reply(strings.Join(lines, "\n"))
+
+	case "clear":
+		_, err := localdb.Delete(key)
+		if err != nil && !localdb.IsNotFound(err) {
+			reply("清除失败")
+		} else {
+			reply("已清除自定义微博告警目标\n将恢复默认行为：私聊发送给所有管理员")
+		}
+
+	case "set":
+		if group <= 0 && qq <= 0 {
+			reply("请指定告警目标\n用法：/config weibo_alert set -g 群号 或 -q QQ号")
+			return
+		}
+
+		if group > 0 && qq > 0 {
+			reply("不能同时指定群和QQ，请只使用其中一个参数")
+			return
+		}
+
+		var alertType string
+		var alertID int64
+
+		if group > 0 {
+			alertType = "group"
+			alertID = group
+		} else {
+			alertType = "private"
+			alertID = qq
+		}
+
+		value := fmt.Sprintf("%s:%d", alertType, alertID)
+		err := localdb.Set(key, value)
+		if err != nil {
+			reply("设置失败")
+			return
+		}
+
+		if alertType == "group" {
+			reply(fmt.Sprintf("已设置微博告警目标为群 %d\nCookie/SUB告警将发送到该群", alertID))
+		} else {
+			reply(fmt.Sprintf("已设置微博告警目标为 QQ %d\nCookie/SUB告警将私聊发送给该用户", alertID))
+		}
+
+	default:
+		reply("私聊用法：/config weibo_alert set -g 群号 | set -q QQ号 | show | clear\n在群内使用 /config weibo_alert true 可为该群启用告警")
+	}
+}
+
+func formatAlertTarget(val string) string {
+	parts := strings.SplitN(val, ":", 2)
+	if len(parts) != 2 {
+		return val
+	}
+	if parts[0] == "group" {
+		return fmt.Sprintf("群 %s（群聊）", parts[1])
+	}
+	return fmt.Sprintf("QQ %s（私聊）", parts[1])
 }
 
 func (lgc *LspGroupCommand) ReverseCommand() {
