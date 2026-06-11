@@ -24,10 +24,6 @@ func init() {
 	c = NewConcern(concern.GetNotifyChan())
 	concern.RegisterConcern(c)
 
-	// 启动时立即刷新一次 Cookie
-	cookieHealthy.Store(false)
-	ForceFreshCookie()
-
 	// 每 5 分钟检查 Cookie 健康状态，异常时向所有订阅群发送告警
 	go func() {
 		var lastAlertSent bool
@@ -62,8 +58,11 @@ func init() {
 				lastAlertSent = false
 			} else if !lastAlertSent {
 				// 刷新失败且尚未发过告警，发送告警通知
-				sendCookieAlertToAllGroups(false)
-				lastAlertSent = true
+				// 检查是否启用了 Cookie 告警通知
+				if cfg.GetWeiboCookieAlertEnabled() {
+					sendCookieAlertToAllGroups(false)
+					lastAlertSent = true
+				}
 			}
 		}
 	}()
@@ -175,28 +174,36 @@ func getBotAdmins() []int64 {
 	return admins
 }
 
-// sendCookieAlertToAllGroups 发送 Cookie 告警/恢复通知
-// 优先级：bot 管理员私聊 > weibo.alertGroupId（群发）> 不发送
-func sendCookieAlertToAllGroups(isRecovery bool) {
+// broadcastAlertToAllTargets 广播告警到所有目标（管理员私聊 + 已启用告警的群）
+func broadcastAlertToAllTargets(sendPrivate func(qq int64), sendGroup func(groupCode int64)) {
 	admins := getBotAdmins()
-
-	if len(admins) > 0 {
-		for _, qq := range admins {
-			sendPrivateAlert(qq, isRecovery)
-		}
-		return
+	for _, qq := range admins {
+		sendPrivate(qq)
 	}
-
-	// 没有管理员，尝试群发
-	groupCode := cfg.GetWeiboAlertGroupId()
-	if groupCode > 0 {
-		sendGroupAlert(groupCode, isRecovery)
-	} else {
-		logger.Debug("未找到 bot 管理员且 weibo.alertGroupId 未配置，跳过 Cookie 告警通知")
+	alertGroups := getEnabledAlertGroups()
+	for _, groupCode := range alertGroups {
+		sendGroup(groupCode)
+	}
+	if len(admins) == 0 && len(alertGroups) == 0 {
+		logger.Debug("无 bot 管理员且无启用告警的群，跳过告警通知")
 	}
 }
 
+// sendCookieAlertToAllGroups 发送 Cookie 告警/恢复通知
+// 默认私聊发送给管理员，同时发送给已启用告警的群（通过 /config weibo_alert true 开启）
+func sendCookieAlertToAllGroups(isRecovery bool) {
+	if !cfg.GetWeiboCookieAlertEnabled() {
+		logger.Debug("微博 Cookie 告警通知已禁用（weibo.disableCookieAlert=true）")
+		return
+	}
+	broadcastAlertToAllTargets(
+		func(qq int64) { sendPrivateAlert(qq, isRecovery) },
+		func(groupCode int64) { sendGroupAlert(groupCode, isRecovery) },
+	)
+}
+
 // sendPrivateAlert 私聊发送 Cookie 告警
+// 使用 -qq 作为 key，避免与群号冲突（群号为正数）
 func sendPrivateAlert(qq int64, isRecovery bool) {
 	alertKey := c.StateManager.CookieAlertKey(-qq)
 	if !isRecovery {
@@ -242,4 +249,159 @@ func sendGroupAlert(groupCode int64, isRecovery bool) {
 	logger.WithField("GroupCode", groupCode).
 		WithField("IsRecovery", isRecovery).
 		Info("已发送微博 Cookie 告警通知")
+}
+
+// NotifySUBExpired 发送 SUB 过期告警通知
+// 默认私聊发送给管理员，同时发送给已启用告警的群
+func NotifySUBExpired() {
+	if !cfg.GetWeiboCookieAlertEnabled() {
+		logger.Debug("微博告警通知已禁用（weibo.disableCookieAlert=true）")
+		return
+	}
+	broadcastAlertToAllTargets(
+		sendSUBExpiredAlert,
+		sendSUBExpiredGroupAlert,
+	)
+}
+
+// getEnabledAlertGroups 从数据库读取所有已启用告警的群列表
+func getEnabledAlertGroups() []int64 {
+	val, err := localdb.Get(localdb.Key("WeiboAlertGroups"))
+	if err != nil || val == "" {
+		return nil
+	}
+	var groups []int64
+	for _, s := range strings.Split(val, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		groupCode, err := strconv.ParseInt(s, 10, 64)
+		if err == nil && groupCode > 0 {
+			groups = append(groups, groupCode)
+		}
+	}
+	return groups
+}
+
+// enableAlertGroup 启用指定群的 Cookie 告警通知
+func enableAlertGroup(groupCode int64) error {
+	return localdb.RWCover(func() error {
+		groups := getEnabledAlertGroups()
+		for _, g := range groups {
+			if g == groupCode {
+				return nil // 已启用
+			}
+		}
+		groups = append(groups, groupCode)
+		strs := make([]string, len(groups))
+		for i, g := range groups {
+			strs[i] = strconv.FormatInt(g, 10)
+		}
+		return localdb.Set(localdb.Key("WeiboAlertGroups"), strings.Join(strs, ","))
+	})
+}
+
+// disableAlertGroup 禁用指定群的 Cookie 告警通知
+func disableAlertGroup(groupCode int64) error {
+	return localdb.RWCover(func() error {
+		groups := getEnabledAlertGroups()
+		var filtered []int64
+		for _, g := range groups {
+			if g != groupCode {
+				filtered = append(filtered, g)
+			}
+		}
+		if len(filtered) == 0 {
+			_, _ = localdb.Delete(localdb.Key("WeiboAlertGroups"))
+			return nil
+		}
+		strs := make([]string, len(filtered))
+		for i, g := range filtered {
+			strs[i] = strconv.FormatInt(g, 10)
+		}
+		return localdb.Set(localdb.Key("WeiboAlertGroups"), strings.Join(strs, ","))
+	})
+}
+
+// isAlertGroupEnabled 检查指定群是否启用了 Cookie 告警通知
+func isAlertGroupEnabled(groupCode int64) bool {
+	for _, g := range getEnabledAlertGroups() {
+		if g == groupCode {
+			return true
+		}
+	}
+	return false
+}
+
+// EnableAlertGroup 启用指定群的 Cookie 告警通知（供外部调用）
+func EnableAlertGroup(groupCode int64) error {
+	return enableAlertGroup(groupCode)
+}
+
+// DisableAlertGroup 禁用指定群的 Cookie 告警通知（供外部调用）
+func DisableAlertGroup(groupCode int64) error {
+	return disableAlertGroup(groupCode)
+}
+
+// IsAlertGroupEnabled 检查指定群是否启用了 Cookie 告警通知（供外部调用）
+func IsAlertGroupEnabled(groupCode int64) bool {
+	return isAlertGroupEnabled(groupCode)
+}
+
+// GetBotAdmins 获取所有 bot 管理员 QQ（供外部调用）
+func GetBotAdmins() []int64 {
+	return getBotAdmins()
+}
+
+// GetEnabledAlertGroups 获取所有已启用告警的群列表（供外部调用）
+func GetEnabledAlertGroups() []int64 {
+	return getEnabledAlertGroups()
+}
+
+// trySetAlertDedup 尝试设置告警去重 key，返回 true 表示可以发送告警
+func trySetAlertDedup(alertKey string) bool {
+	err := c.StateManager.Set(alertKey, "",
+		localdb.SetExpireOpt(time.Hour*24), localdb.SetNoOverWriteOpt())
+	if err != nil {
+		if localdb.IsRollback(err) {
+			logger.Debug("SUB 过期告警已在 24 小时内发送过，跳过")
+		} else {
+			logger.Errorf("设置 SUB 过期告警状态失败: %v", err)
+		}
+		return false
+	}
+	return true
+}
+
+// sendSUBExpiredAlert 私聊发送 SUB 过期告警
+// 使用 -qq 作为 key，避免与群号冲突（群号为正数）
+func sendSUBExpiredAlert(qq int64) {
+	if !trySetAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq)) {
+		return
+	}
+
+	notify := NewSUBExpiredNotify(0)
+	m := notify.ToMessage()
+	sm := m.ToCombineMessage(mmsg.NewPrivateTarget(qq))
+	summary := msgstringer.AdapterMsgToString(sm.Elements)
+
+	if bot.Instance == nil || !bot.Instance.Online.Load() {
+		logger.WithField("QQ", qq).Warn("Bot 未在线，无法发送私聊告警")
+		return
+	}
+	bot.Instance.SendPrivateMessage(qq, sm, summary)
+	logger.WithField("QQ", qq).Info("已发送微博 SUB 过期告警私聊")
+}
+
+// sendSUBExpiredGroupAlert 群发 SUB 过期告警
+func sendSUBExpiredGroupAlert(groupCode int64) {
+	if !trySetAlertDedup(c.StateManager.SUBExpiredAlertKey(groupCode)) {
+		return
+	}
+
+	notify := NewSUBExpiredNotify(groupCode)
+	concern.GetNotifyChan() <- notify
+	logger.WithField("GroupCode", groupCode).
+		Info("已发送微博 SUB 过期告警通知")
 }

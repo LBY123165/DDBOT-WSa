@@ -100,58 +100,49 @@ func ApiContainerGetIndexCards(uid int64) (*ApiContainerGetIndexCardsResponse, e
 }
 
 func apiContainerGetIndexCardsLogin(uid int64) (*ApiContainerGetIndexCardsResponse, error) {
-	// 获取 CookieOption
 	cookieOpts := CookieOption()
-	if len(cookieOpts) == 0 {
-		logger.Warnf("uid=%d: CookieOption 为空，未加载任何 Cookie", uid)
-	} else {
-		subValue := requests.ExtractCookieOption(cookieOpts, "SUB")
-		if subValue != "" {
-			logger.Debugf("uid=%d: 使用 SUB=%s...", uid, subValue[:min(20, len(subValue))])
-		} else {
-			logger.Warnf("uid=%d: CookieOption 中未找到 SUB", uid)
-		}
-	}
-
-	// 构建请求选项：先添加基础选项
 	opts := buildRequestOptions(CreateReferer(uid))
-
-	// 然后添加 Cookie
 	opts = append(opts, cookieOpts...)
-
-	// 最后从完整的 opts 中提取 XSRF-TOKEN（这样就能从 Cookie 中提取了）
 	opts = append(opts, SetXsrfToken(opts))
-
-	// 调试：打印使用的 XSRF-TOKEN
-	xsrfToken := requests.ExtractCookieOption(cookieOpts, "XSRF-TOKEN")
-	if xsrfToken != "" {
-		logger.Debugf("uid=%d: 使用 XSRF-TOKEN=%s", uid, xsrfToken)
-	} else {
-		logger.Warnf("uid=%d: 未找到 XSRF-TOKEN", uid)
-	}
 
 	profileResp := new(ApiContainerGetIndexCardsResponse)
 	err := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &profileResp, opts...)
 	if err != nil {
-		markCookieUnhealthy(err)
-		logger.Errorf("uid=%d: 请求失败 - %v", uid, err)
-
-		var rawResp map[string]interface{}
-		rawErr := requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &rawResp, opts...)
-		if rawErr != nil {
-			logger.Warnf("uid=%d: 无法解析为 JSON，可能返回了 HTML", uid)
+		// 检测是否是 Cookie 失效（返回 HTML）
+		if isCookieFailure(err) {
+			logger.Warnf("uid=%d: 检测到 Cookie 失效，尝试刷新会话 cookie", uid)
+			if RefreshSessionCookie() {
+				// 刷新成功，重新构建请求并重试
+				cookieOpts = CookieOption()
+				opts = buildRequestOptions(CreateReferer(uid))
+				opts = append(opts, cookieOpts...)
+				opts = append(opts, SetXsrfToken(opts))
+				profileResp = new(ApiContainerGetIndexCardsResponse)
+				err = requests.Get(PathContainerGetIndex_Cards_Login, CreateParam(uid), &profileResp, opts...)
+				if err != nil {
+					// 刷新后仍失败，可能是 SUB 过期
+					if isCookieFailure(err) {
+						logger.Errorf("uid=%d: 会话 cookie 刷新后仍返回 HTML，SUB 可能已过期", uid)
+						NotifySUBExpired()
+					} else {
+						logger.Errorf("uid=%d: 刷新后重试仍失败: %v", uid, err)
+					}
+					markCookieUnhealthy(err)
+					return nil, err
+				}
+				logger.Infof("uid=%d: Cookie 刷新后重试成功", uid)
+			} else {
+				// 刷新失败，可能是 SUB 过期
+				logger.Errorf("uid=%d: 会话 cookie 刷新失败，SUB 可能已过期", uid)
+				NotifySUBExpired()
+				markCookieUnhealthy(err)
+				return nil, err
+			}
+		} else {
+			markCookieUnhealthy(err)
+			logger.Errorf("uid=%d: 请求失败 - %v", uid, err)
+			return nil, err
 		}
-
-		// 如果是 API 模式且请求失败，提示用户检查 baseURL 配置
-		if cfg.IsWeiboAPIMode() {
-			logger.Warnf("uid=%d: API 模式请求失败，请检查 apiModeBaseURL 配置是否正确", uid)
-		}
-		return nil, err
-	}
-
-	// 调试：检查返回的 OK 状态
-	if profileResp.GetOk() != 1 {
-		logger.Warnf("uid=%d: API 返回非成功状态 ok=%d", uid, profileResp.GetOk())
 	}
 
 	return profileResp, nil
@@ -271,10 +262,10 @@ func (r *WeiboMobileProfileResponse) ToProfileResponse() *ApiContainerGetIndexPr
 	data := &ApiContainerGetIndexProfileResponse_Data{}
 	if r.Data.UserInfo != nil {
 		data.User = &ApiContainerGetIndexProfileResponse_Data_UserInfo{
-			Id:               r.Data.UserInfo.Id,
-			ScreenName:       r.Data.UserInfo.ScreenName,
-			ProfileImageUrl:  r.Data.UserInfo.ProfileImageUrl,
-			ProfileUrl:       r.Data.UserInfo.ProfileUrl,
+			Id:              r.Data.UserInfo.Id,
+			ScreenName:      r.Data.UserInfo.ScreenName,
+			ProfileImageUrl: r.Data.UserInfo.ProfileImageUrl,
+			ProfileUrl:      r.Data.UserInfo.ProfileUrl,
 		}
 	}
 	resp.Data = data
@@ -320,17 +311,17 @@ func (r *MobileMblog) ToCard() *Card {
 		return nil
 	}
 	card := &Card{
-		Id:        int64StrToInt64(r.Id),
-		Mid:       r.Mid,
-		Text:      r.Text,
+		Id:         int64StrToInt64(r.Id),
+		Mid:        r.Mid,
+		Text:       r.Text,
 		TextLength: r.TextLength,
-		RawText:   r.RawText,
-		CreatedAt: r.CreatedAt,
-		User:      r.User.ToUserInfo(),
-		Mblogid:   r.Mblogid,
-		Mblogtype: CardType(r.Mblogtype),
-		PicIds:    r.PicIds,
-		PageInfo:  toCardPageInfo(r.PageInfo),
+		RawText:    r.RawText,
+		CreatedAt:  r.CreatedAt,
+		User:       r.User.ToUserInfo(),
+		Mblogid:    r.Mblogid,
+		Mblogtype:  CardType(r.Mblogtype),
+		PicIds:     r.PicIds,
+		PageInfo:   toCardPageInfo(r.PageInfo),
 	}
 	if r.Visible != nil {
 		card.Visible = &Card_Visible{
@@ -360,9 +351,9 @@ func extractPicsToPicInfos(v *structpb.Value) map[string]*Card_PicInfo {
 		return nil
 	}
 	var pics []struct {
-		Pid  string `json:"pid"`
-		Url  string `json:"url"`
-		Size string `json:"size"`
+		Pid   string `json:"pid"`
+		Url   string `json:"url"`
+		Size  string `json:"size"`
 		Large *struct {
 			Url string `json:"url"`
 		} `json:"large"`

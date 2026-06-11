@@ -202,7 +202,14 @@ func GetTwitchOnlyOnlineNotify() bool {
 func GetWeiboMode() string {
 	mode := strings.TrimSpace(config.GlobalConfig.GetString("weibo.mode"))
 	if mode == "" {
-		mode = "guest"
+		// 未指定模式时，如果已配置 SUB 则自动使用 login 模式
+		sub := strings.TrimSpace(config.GlobalConfig.GetString("weibo.sub"))
+		if sub != "" {
+			mode = "login"
+			logger.Debugf("weibo.mode 未配置，检测到 weibo.sub 已配置，自动使用 login 模式")
+		} else {
+			mode = "guest"
+		}
 		return mode
 	}
 	if mode != "guest" && mode != "login" && mode != "api" {
@@ -240,8 +247,49 @@ func GetWeiboAutoRefresh() bool {
 }
 
 // GetWeiboAlertGroupId 获取 Cookie 告警通知的目标群号，0 表示不发群
+// Deprecated: 新告警逻辑改为通过 /config weibo_alert 逐群控制，此配置项已不再使用
 func GetWeiboAlertGroupId() int64 {
 	return config.GlobalConfig.GetInt64("weibo.alertGroupId")
+}
+
+// GetWeiboCookieAlertEnabled 检查是否启用 Cookie 失效告警通知
+func GetWeiboCookieAlertEnabled() bool {
+	// 默认启用，显式设置为 false 时禁用
+	return !config.GlobalConfig.GetBool("weibo.disableCookieAlert")
+}
+
+// GetWeiboAlertQQList 获取 Cookie 告警通知的 QQ 列表（私聊）
+// 支持两种格式：
+// 1. 数组格式：[123456, 789012]
+// 2. 字符串格式："123456,789012" 或 "123456 789012"
+func GetWeiboAlertQQList() []int64 {
+	var result []int64
+
+	// 尝试从 viper 获取数组
+	list := config.GlobalConfig.GetStringSlice("weibo.alertQQList")
+	if len(list) > 0 {
+		for _, s := range list {
+			if id := cast.ToInt64(s); id > 0 {
+				result = append(result, id)
+			}
+		}
+		return result
+	}
+
+	// 尝试从字符串解析（逗号或空格分隔）
+	str := strings.TrimSpace(config.GlobalConfig.GetString("weibo.alertQQList"))
+	if str == "" {
+		return nil
+	}
+
+	// 替换逗号为空格，然后按空格分割
+	str = strings.ReplaceAll(str, ",", " ")
+	for _, s := range strings.Fields(str) {
+		if id := cast.ToInt64(s); id > 0 {
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 // GetSnapCastURL 获取 SnapCast 服务地址，用于生成微博 rid

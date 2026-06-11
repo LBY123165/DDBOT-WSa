@@ -317,11 +317,15 @@ func FreshCookieLogin() ([]*http.Cookie, error) {
 		panic(fmt.Sprintf("path %v url parse error", pathPassportGenvisitorProd))
 	}
 	cookies := jar.Cookies(cookieUrl)
-	for _, cookie := range jar.Cookies(baseUrl) {
-		if cookie.Name == "XSRF-TOKEN" || cookie.Name == "WBPSESS" {
-			cookies = append(cookies, cookie)
+
+	// 从 weibo.com 获取 XSRF-TOKEN 和 WBPSESS
+	weiboCookies := jar.Cookies(baseUrl)
+	for _, c := range weiboCookies {
+		if c.Name == "XSRF-TOKEN" || c.Name == "WBPSESS" {
+			cookies = append(cookies, c)
 		}
 	}
+
 	return cookies, nil
 }
 
@@ -401,6 +405,14 @@ func ForceFreshCookie() bool {
 	existingSUB := extractCookieValue(currentOpts, "SUB")
 	existingXSRF := extractCookieValue(currentOpts, "XSRF-TOKEN")
 
+	// 如果内存中没有 SUB，尝试从配置中读取
+	if existingSUB == "" {
+		existingSUB = GetSettingCookie()
+		if existingSUB != "" {
+			logger.Debugf("从配置中读取到 SUB")
+		}
+	}
+
 	cookies, err := FreshCookieLogin()
 	if err != nil {
 		fails := consecutiveCookieFails.Inc()
@@ -451,6 +463,47 @@ func ForceFreshCookie() bool {
 
 func extractCookieValue(opts []requests.Option, name string) string {
 	return requests.ExtractCookieOption(opts, name)
+}
+
+// RefreshSessionCookie 刷新会话 cookie（XSRF-TOKEN、WBPSESS 等），保留 SUB
+// 用于 Cookie 失效时自动恢复，不影响用户登录状态
+func RefreshSessionCookie() bool {
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
+
+	// 获取当前的 SUB
+	currentOpts := CookieOption()
+	existingSUB := extractCookieValue(currentOpts, "SUB")
+	if existingSUB == "" {
+		existingSUB = GetSettingCookie()
+	}
+	if existingSUB == "" {
+		logger.Warn("RefreshSessionCookie: 无可用的 SUB，跳过刷新")
+		return false
+	}
+
+	// 获取新的会话 cookie
+	cookies, err := FreshCookieLogin()
+	if err != nil {
+		logger.Errorf("RefreshSessionCookie: FreshCookieLogin 失败: %v", err)
+		return false
+	}
+
+	// 构建新的 cookie 选项，保留 SUB
+	var opt []requests.Option
+	for _, cookie := range cookies {
+		if cookie.Name == "SUB" {
+			// 跳过 FreshCookieLogin 返回的 SUB（如果有），使用现有的
+			continue
+		}
+		opt = append(opt, requests.CookieOption(cookie.Name, cookie.Value))
+	}
+	// 添加保留的 SUB
+	opt = append(opt, requests.CookieOption("SUB", existingSUB))
+
+	visitorCookiesOpt.Store(opt)
+	logger.Infof("会话 cookie 已刷新，保留 SUB，共加载 %d 个 cookie", len(opt))
+	return true
 }
 
 // PauseRefreshOnRateLimit 当触发 -100（频率限制）时暂停刷新

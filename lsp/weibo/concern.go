@@ -92,6 +92,8 @@ func (c *Concern) Start() error {
 				}
 				sub = obtained
 				logger.Infof("扫码登录成功，已获取 SUB。请写入 application.yaml -> weibo.sub 以便下次启动：%s", sub)
+				// 扫码成功后立即加载 Cookie 到内存
+				freshCookieOpt(sub)
 			}
 
 			// 如果仍然没有 SUB，模块关闭
@@ -120,23 +122,41 @@ func (c *Concern) Start() error {
 		StartSubAutoRefresh()
 	}
 
+	// 启动时立即刷新一次 Cookie（配置已加载，可以正确判断模式）
+	if !isAPI {
+		cookieHealthy.Store(false)
+		ForceFreshCookie()
+	}
+
 	if !isGuest && !isAPI {
 		// 测试微博 cookie 是否有效，并显示登录信息
 		go func() {
 			// 等待 cookie 刷新完成
 			time.Sleep(2 * time.Second)
 
-			// 微博没有直接获取当前登录用户信息的 API
-			// 通过访问一个测试用户页面来验证 cookie 有效性
 			testUid := int64(5462373877) // 捞穹苍的信息试试 [doge]
+
+			// 先测试 Profile API
 			profileResp, err := ApiContainerGetIndexProfile(testUid)
 			if err != nil {
-				logger.Errorf("微博 Cookie 验证失败 - %v，微博功能可能无法正常使用", err)
+				logger.Errorf("微博 Cookie 验证失败 - Profile API: %v，微博功能可能无法正常使用", err)
 				return
 			}
 
 			if profileResp.GetOk() != 1 {
-				logger.Errorf("微博 Cookie 验证失败 - 接口返回错误码：%v，微博功能可能无法正常使用", profileResp.GetOk())
+				logger.Errorf("微博 Cookie 验证失败 - Profile API 返回错误码: %v，微博功能可能无法正常使用", profileResp.GetOk())
+				return
+			}
+
+			// 再测试 Cards API（获取微博列表），这个 API 需要有效的登录 Cookie
+			cardsResp, err := ApiContainerGetIndexCards(testUid)
+			if err != nil {
+				logger.Errorf("微博 Cookie 验证失败 - Cards API: %v，Cookie 可能已失效", err)
+				return
+			}
+
+			if cardsResp.GetOk() != 1 {
+				logger.Errorf("微博 Cookie 验证失败 - Cards API 返回错误码: %v，Cookie 可能已失效", cardsResp.GetOk())
 				return
 			}
 
@@ -386,6 +406,8 @@ func (c *Concern) notifyGenerator() concern.NotifyGeneratorFunc {
 				}
 			}
 		case *CookieAlertNotify:
+			result = append(result, news)
+		case *SUBExpiredNotify:
 			result = append(result, news)
 		}
 		return result

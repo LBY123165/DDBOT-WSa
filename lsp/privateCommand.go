@@ -407,6 +407,11 @@ func (c *LspPrivateCommand) ConfigCommand() {
 				Id string `arg:"" help:"配置的主播id"`
 			} `cmd:"" help:"查看当前过滤器" name:"show" group:"filter"`
 		} `cmd:"" help:"配置动态过滤器" name:"filter"`
+		WeiboAlert struct {
+			Action string `arg:"" optional:"" default:"show" enum:"set,clear,show" help:"set=设置告警目标, clear=清除, show=查看当前设置"`
+			Group  int64  `optional:"" short:"g" help:"告警发送到指定群"`
+			QQ     int64  `optional:"" short:"q" help:"告警私聊发送给指定QQ"`
+		} `cmd:"" help:"配置微博Cookie/SUB告警通知的发送对象" name:"weibo_alert"`
 		Group int64 `optional:"" short:"g" help:"要操作的QQ群号码"`
 	}
 
@@ -421,14 +426,18 @@ func (c *LspPrivateCommand) ConfigCommand() {
 	}
 
 	groupCode := configCmd.Group
-	if err := c.checkGroupCode(groupCode); err != nil {
-		c.textReply(err.Error())
-		return
-	}
 
 	kongPath := strings.Split(kongCtx.Command(), " ")
 
 	cmd := kongPath[0]
+
+	// weibo_alert 不需要群号校验，其他子命令需要
+	if cmd != "weibo_alert" {
+		if err := c.checkGroupCode(groupCode); err != nil {
+			c.textReply(err.Error())
+			return
+		}
+	}
 	log = log.WithFields(localutils.GroupLogFields(groupCode)).WithField("sub_command", cmd)
 
 	switch cmd {
@@ -506,6 +515,8 @@ func (c *LspPrivateCommand) ConfigCommand() {
 			log.WithField("filter_cmd", filterCmd).Errorf("unknown filter command")
 			c.textSend("未知的filter子命令")
 		}
+	case "weibo_alert":
+		handleWeiboAlertPrivate(func(s string) { c.textSend(s) }, configCmd.WeiboAlert.Action, configCmd.WeiboAlert.Group, configCmd.WeiboAlert.QQ)
 	default:
 		c.textSend("暂未支持，你可以催作者GKD")
 	}

@@ -266,6 +266,12 @@ weibo:
   # 可配置为自建的 SnapCast 服务地址
   snapcastURL: ""
 
+  # Cookie 告警通知配置
+  disableCookieAlert: false  # 设为 true 可关闭 Cookie/SUB 失效告警通知
+  alertGroupId: 0            # Cookie 告警发送到指定群，0 表示不发群
+  # alertQQList:             # Cookie 告警私聊发送给指定 QQ（可选，支持数组或逗号分隔字符串）
+  #   - 123456
+
 youtube:
   onlyOnlineNotify: true  # 是否不推送 Bot 离线期间的动态和直播，默认为 false 表示需要推送，设置为 true 表示不推送
 
