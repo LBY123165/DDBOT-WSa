@@ -1529,6 +1529,7 @@ func (c *LspPrivateCommand) templateMsg(name string, data map[string]interface{}
 func (c *LspPrivateCommand) sender() *adapter.SenderInfo {
 	return &adapter.SenderInfo{
 		UserID:   c.msg.Sender.UserID,
+		Uin:      c.msg.Sender.UserID,
 		Nickname: c.msg.Sender.Nickname,
 	}
 }
