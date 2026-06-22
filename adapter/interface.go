@@ -305,8 +305,14 @@ type GetMsgResult struct {
 	Sender     *SenderInfo
 }
 
+// SenderInfo 描述消息发送者信息。
+//
+// 注意：Uin 与 UserID 是同义字段，值始终保持一致。
+// 保留 Uin 是为了向后兼容早期模板中的 `.msg.Sender.Uin` 写法，
+// 新代码请优先使用 UserID。
 type SenderInfo struct {
 	UserID   int64
+	Uin      int64
 	Nickname string
 	Card     string
 	Role     string

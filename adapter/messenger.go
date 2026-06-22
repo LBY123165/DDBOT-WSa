@@ -250,6 +250,7 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 					GroupCode: groupCode,
 					Sender: &SenderInfo{
 						UserID: m.Uin,
+						Uin:    m.Uin,
 					},
 					Elements: chunkMsg.Elements,
 				},
@@ -315,6 +316,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 		Self:   m.Uin,
 		Sender: &SenderInfo{
 			UserID: m.Uin,
+			Uin:    m.Uin,
 		},
 		Elements: msg.Elements,
 	}
@@ -1356,6 +1358,7 @@ func (m *Messenger) handleGroupMessage(event *GroupMessageEvent) {
 
 	sender := &SenderInfo{
 		UserID: event.UserID,
+		Uin:    event.UserID,
 	}
 	group := m.FindGroup(event.GroupID)
 	if group != nil {
@@ -1410,6 +1413,7 @@ func (m *Messenger) handlePrivateMessage(event *PrivateMessageEvent) {
 		Self:   event.SelfID,
 		Sender: &SenderInfo{
 			UserID:   event.UserID,
+			Uin:      event.UserID,
 			Nickname: nickname,
 		},
 		Time:     event.Time,

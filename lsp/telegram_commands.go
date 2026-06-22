@@ -438,7 +438,7 @@ func (l *Lsp) newTGContext(chatID, fromID, senderUin, groupCode int64) *MessageC
 		Lsp:    l,
 		Log:    logger.WithField("tg_chat", chatID).WithField("tg_from", fromID).WithField("group", groupCode),
 		Target: mmsg.NewGroupTarget(groupCode),
-		Sender: &adapter.SenderInfo{UserID: senderUin, Nickname: "tg:" + strconv.FormatInt(fromID, 10)},
+		Sender: &adapter.SenderInfo{UserID: senderUin, Uin: senderUin, Nickname: "tg:" + strconv.FormatInt(fromID, 10)},
 	}
 	c.ReplyFunc = func(m *mmsg.MSG) interface{} {
 		lsptelegram.SendToChat(chatID, m)

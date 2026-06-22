@@ -65,11 +65,13 @@ const (
 var (
 	Sender1 = &adapter.SenderInfo{
 		UserID:   UID1,
+		Uin:      UID1,
 		Nickname: NAME1,
 	}
 
 	Sender2 = &adapter.SenderInfo{
 		UserID:   UID2,
+		Uin:      UID2,
 		Nickname: NAME2,
 	}
 )

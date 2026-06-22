@@ -1344,6 +1344,7 @@ func (lgc *LspGroupCommand) NewMessageContext(log *logrus.Entry) *MessageContext
 	}
 	ctx.Sender = &adapter.SenderInfo{
 		UserID:   lgc.msg.Sender.UserID,
+		Uin:      lgc.msg.Sender.UserID,
 		Nickname: lgc.msg.Sender.Nickname,
 		Card:     lgc.msg.Sender.Card,
 	}
