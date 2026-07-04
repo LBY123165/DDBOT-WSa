@@ -1,4 +1,6 @@
 ﻿## DDBOT鏈€杩戞洿鏂版棩蹇?
+- Unreleased
+  - **模板兼容性修复**: 重构期间 adapter.SenderInfo 的 Uin 字段被重命名为 UserID, 造成老模板中 .msg.Sender.Uin 取值失败。现保留 Uin 字段作为 UserID 的同义别名，构造时同步写入；新代码仍推荐使用 UserID，老模板无需修改。
 - 2025-05-20 0.3.9(Wsa)
   - 鍓旈櫎CQ鐮侊紝鏀逛负array鏂瑰紡鍙戦€佹秷鎭?
   - 鏀寔Twitter璁㈤槄

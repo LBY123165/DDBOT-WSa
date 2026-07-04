@@ -14,6 +14,7 @@ func TestSerializationAdapterGroupMsg(t *testing.T) {
 		GroupCode: test.G1,
 		Sender: &adapter.SenderInfo{
 			UserID: test.ID1,
+			Uin:    test.ID1,
 		},
 		Time: 30,
 		Elements: []adapter.IMessageElement{

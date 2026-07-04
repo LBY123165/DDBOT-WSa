@@ -780,8 +780,10 @@ func (a *OneBotAdapter) GetMsg(msgId int32) (*adapter.GetMsgResult, error) {
 	}
 
 	if sender, ok := msgMap["sender"].(map[string]interface{}); ok {
+		uid := getInt64(sender["user_id"])
 		result.Sender = &adapter.SenderInfo{
-			UserID:   getInt64(sender["user_id"]),
+			UserID:   uid,
+			Uin:      uid,
 			Nickname: getString(sender["nickname"]),
 			Card:     getString(sender["card"]),
 			Role:     getString(sender["role"]),
