@@ -581,10 +581,7 @@ func (n *SUBExpiredNotify) ToMessage() *mmsg.MSG {
 	m.Textf("[微博SUB过期告警]")
 	m.Textf("\n⚠ 检测到微博 SUB（登录凭证）可能已过期")
 	m.Textf("\n微博订阅推送可能无法正常工作")
-	m.Textf("\n请管理员手动重新登录获取新的 SUB")
-	m.Textf("\n可通过以下方式获取：")
-	m.Textf("\n1. 启用 weibo.qrlogin 扫码登录")
-	m.Textf("\n2. 手动配置 weibo.sub")
+	m.Textf("\n请联系管理员重新登陆")
 	return m
 }
 

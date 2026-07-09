@@ -37,6 +37,7 @@ var CommandMaps = map[string]string{
 	"NoUpdateCommand":      NoUpdateCommand,
 	"AbnormalConcernCheck": AbnormalConcernCheck,
 	"CleanConcern":         CleanConcern,
+	"WbLoginCommand":       WbLoginCommand,
 }
 
 const (
@@ -75,6 +76,7 @@ const (
 	AbnormalConcernCheck = "检测异常订阅"
 	CleanConcern         = "清除订阅"
 	ResubscribeCommand   = "重新订阅" // 微博一键重新订阅
+	WbLoginCommand       = "wb登陆"   // 微博扫码登录
 )
 
 var allGroupCommand = [...]string{
@@ -95,7 +97,7 @@ var allPrivateOperate = [...]string{
 	WhosyourdaddyCommand, QuitCommand, ModeCommand,
 	GroupRequestCommand, FriendRequestCommand, AdminCommand,
 	SilenceCommand, NoUpdateCommand, AbnormalConcernCheck,
-	CleanConcern,
+	CleanConcern, WbLoginCommand,
 }
 
 var nonOprateable = [...]string{

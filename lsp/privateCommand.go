@@ -117,6 +117,8 @@ func (c *LspPrivateCommand) Execute() {
 		c.CleanConcernCommand()
 	case ResubscribeCommand:
 		c.ResubscribeCommand()
+	case WbLoginCommand:
+		c.WbLoginCommand()
 	default:
 		if CheckCustomPrivateCommand(c.CommandName()) {
 			func() {
@@ -289,6 +291,82 @@ func (c *LspPrivateCommand) ResubscribeCommand() {
 	}
 
 	c.textSend(fmt.Sprintf("成功 - 已重新订阅 %d 个微博用户", count))
+}
+
+func (c *LspPrivateCommand) WbLoginCommand() {
+	log := c.DefaultLoggerWithCommand(c.CommandName())
+	log.Infof("run %v command", c.CommandName())
+	defer func() { log.Infof("%v command end", c.CommandName()) }()
+
+	if !c.l.PermissionStateManager.RequireAny(
+		permission.AdminRoleRequireOption(c.uin()),
+	) {
+		c.noPermission()
+		return
+	}
+
+	_, output := c.parseCommandSyntax(&struct{}{}, c.CommandName())
+	if output != "" {
+		c.textReply(output)
+	}
+	if c.exit {
+		return
+	}
+
+	// 检查是否启用了 qrlogin
+	if !weibo.GetQRLoginEnable() {
+		c.textReply("微博扫码登录未启用，请在 application.yaml 中设置 weibo.qrlogin: true")
+		return
+	}
+
+	// 启动扫码登录，获取 channel
+	resultChan, err := weibo.RunQRLoginForQQ(5 * time.Minute)
+	if err != nil {
+		log.Errorf("启动微博扫码登录失败：%v", err)
+		c.textReply(fmt.Sprintf("启动微博扫码登录失败：%v", err))
+		return
+	}
+
+	// 读取第一个结果（二维码图片）
+	firstResult, ok := <-resultChan
+	if !ok {
+		c.textReply("扫码登录异常终止")
+		return
+	}
+
+	if firstResult.Error != nil {
+		log.Errorf("获取二维码失败：%v", firstResult.Error)
+		c.textReply(fmt.Sprintf("获取二维码失败：%v", firstResult.Error))
+		return
+	}
+
+	// 发送二维码图片
+	if len(firstResult.QRCodeImage) > 0 {
+		m := mmsg.NewMSG()
+		m.Image(firstResult.QRCodeImage, "微博扫码二维码")
+		m.Textf("\n请在 5 分钟内使用微博 APP 扫码登录")
+		c.send(m)
+	} else {
+		c.textReply("获取二维码图片失败")
+		return
+	}
+
+	// 等待扫码结果
+	go func() {
+		for result := range resultChan {
+			if result.Error != nil {
+				log.Errorf("微博扫码登录失败：%v", result.Error)
+				c.textReply(fmt.Sprintf("微博扫码登录失败：%v", result.Error))
+				return
+			}
+
+			if result.Sub != "" {
+				log.Infof("微博扫码登录成功，SUB: %s...", result.Sub[:min(20, len(result.Sub))])
+				c.textReply("微博扫码登录成功！\nSUB 已写入配置文件并立即生效。")
+				return
+			}
+		}
+	}()
 }
 
 func (c *LspPrivateCommand) WhosyourdaddyCommand() {

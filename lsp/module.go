@@ -938,8 +938,25 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	}()
 	l.CronjobReload()
 	l.CronStart()
-	concern.StartAll()
-	l.started.Store(true)
+
+	// 等待 bot 上线后再启动订阅系统，避免 not connected 和 nil group info 错误
+	go func() {
+		logger.Info("等待 bot 上线后再启动订阅系统...")
+		for !bot.Online.Load() {
+			time.Sleep(time.Second)
+		}
+		// bot 已上线，等待群列表加载完成
+		time.Sleep(3 * time.Second)
+		logger.Info("bot 已上线，启动订阅系统")
+		concern.StartAll()
+		l.started.Store(true)
+		logger.Infof("DDBOT启动完成")
+		logger.Infof("D宝，一款真正人性化的单推BOT")
+		if len(l.PermissionStateManager.ListAdmin()) == 0 {
+			logger.Infof("您似乎正在部署全新的BOT，请通过qq对bot私聊发送<%v>(不含括号)获取管理员权限，然后私聊发送<%v>(不含括号)开始使用您的bot",
+				l.CommandShowName(WhosyourdaddyCommand), l.CommandShowName(HelpCommand))
+		}
+	}()
 
 	// 启动TG适配器
 	l.StartTelegramCommands()
@@ -952,13 +969,6 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 		}
 	}()
 	go l.NewVersionNotify(newVersionChan)
-
-	logger.Infof("DDBOT启动完成")
-	logger.Infof("D宝，一款真正人性化的单推BOT")
-	if len(l.PermissionStateManager.ListAdmin()) == 0 {
-		logger.Infof("您似乎正在部署全新的BOT，请通过qq对bot私聊发送<%v>(不含括号)获取管理员权限，然后私聊发送<%v>(不含括号)开始使用您的bot",
-			l.CommandShowName(WhosyourdaddyCommand), l.CommandShowName(HelpCommand))
-	}
 
 }
 

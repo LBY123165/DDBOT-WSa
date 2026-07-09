@@ -150,6 +150,174 @@ func fetchQRCode(client *http.Client, opt QRLoginOption) (string, error) {
 	return qrResp.Data.Qrid, nil
 }
 
+// QRLoginResult 扫码登录结果
+type QRLoginResult struct {
+	QRCodeImage []byte // 二维码图片数据
+	Sub         string // 登录成功后的 SUB
+	Error       error  // 错误信息
+}
+
+// RunQRLoginForQQ 为 QQ 扫码登录优化的版本
+// 返回一个 channel，用户可以通过它获取二维码图片和登录结果
+// timeout 为扫码超时时间，默认 5 分钟
+func RunQRLoginForQQ(timeout time.Duration) (<-chan QRLoginResult, error) {
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{
+		Jar:     jar,
+		Timeout: 15 * time.Second,
+	}
+
+	// 获取二维码
+	qrid, qrImage, err := fetchQRCodeWithImage(client)
+	if err != nil {
+		return nil, fmt.Errorf("获取二维码失败: %v", err)
+	}
+
+	resultChan := make(chan QRLoginResult, 1)
+
+	// 先发送二维码图片
+	resultChan <- QRLoginResult{QRCodeImage: qrImage}
+
+	// 启动异步扫码等待
+	go func() {
+		defer close(resultChan)
+
+		// 等待扫码
+		rawCheck, err := pollQRCodeWithTimeout(client, qrid, timeout)
+		if err != nil {
+			resultChan <- QRLoginResult{Error: err}
+			return
+		}
+
+		// 完成登录
+		sub, err := finalizeLogin(client, rawCheck, ".")
+		if err != nil {
+			resultChan <- QRLoginResult{Error: err}
+			return
+		}
+
+	// 写入配置文件
+	if err := WriteBackConfig(sub); err != nil {
+		qrLogger.Warnf("SUB 已获取，但写入配置失败: %v", err)
+	}
+
+	// 立即加载新 SUB 到内存，无需重启
+	freshCookieOpt(sub)
+
+	resultChan <- QRLoginResult{Sub: sub}
+	}()
+
+	return resultChan, nil
+}
+
+// fetchQRCodeWithImage 获取二维码图片并返回图片数据
+func fetchQRCodeWithImage(client *http.Client) (string, []byte, error) {
+	cb := fmt.Sprintf("STK_%d", time.Now().UnixMilli())
+	params := url.Values{}
+	params.Set("entry", "miniblog")
+	params.Set("size", "180")
+	params.Set("callback", cb)
+
+	reqURL := qrImageURL + "?" + params.Encode()
+	req, _ := http.NewRequest(http.MethodGet, reqURL, nil)
+	req.Header.Set("User-Agent", defaultUA)
+	req.Header.Set("Referer", defaultRefer)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	m := jsonpRegex.FindStringSubmatch(string(body))
+	if len(m) < 2 {
+		return "", nil, fmt.Errorf("unexpected response: %s", string(body))
+	}
+	var qrResp qrImageResp
+	if err := json.Unmarshal([]byte(m[1]), &qrResp); err != nil {
+		return "", nil, err
+	}
+	if qrResp.Retcode != 20000000 {
+		return "", nil, fmt.Errorf("qr image retcode=%d msg=%s", qrResp.Retcode, qrResp.Msg)
+	}
+	imageURL := qrResp.Data.Image
+	if !strings.HasPrefix(imageURL, "http") {
+		imageURL = "https:" + imageURL
+	}
+
+	// 下载图片
+	imgReq, _ := http.NewRequest(http.MethodGet, imageURL, nil)
+	imgReq.Header.Set("User-Agent", defaultUA)
+	imgReq.Header.Set("Referer", defaultRefer)
+	imgResp, err := client.Do(imgReq)
+	if err != nil {
+		return "", nil, err
+	}
+	defer imgResp.Body.Close()
+	imgData, _ := io.ReadAll(imgResp.Body)
+
+	return qrResp.Data.Qrid, imgData, nil
+}
+
+// pollQRCodeWithTimeout 带超时的扫码轮询
+func pollQRCodeWithTimeout(client *http.Client, qrid string, timeout time.Duration) (*qrCheckResp, error) {
+	params := url.Values{}
+	params.Set("entry", "miniblog")
+	params.Set("source", "miniblog")
+	params.Set("url", qrLoginTarget)
+	params.Set("qrid", qrid)
+	params.Set("disp", "popup")
+	params.Set("rid", "")
+	params.Set("ver", "20250520")
+
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		reqURL := qrCheckURL + "?" + params.Encode()
+		req, _ := http.NewRequest(http.MethodGet, reqURL, nil)
+		req.Header.Set("User-Agent", defaultUA)
+		req.Header.Set("Referer", defaultRefer)
+		resp, err := client.Do(req)
+		if err != nil {
+			qrLogger.Debugf("轮询异常: %v", err)
+			continue
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		var c qrCheckResp
+		if err := json.Unmarshal(body, &c); err != nil {
+			qrLogger.Debugf("轮询解析失败: %v - %s", err, string(body))
+			continue
+		}
+
+		if rid, ok := c.Data["rid"].(string); ok && rid != "" {
+			params.Set("rid", rid)
+		}
+
+		switch c.Retcode {
+		case 20000000:
+			qrLogger.Info("扫码成功，等待登录完成")
+			return &c, nil
+		case 50114002:
+			// 静音轮询，避免刷屏
+		case 50114001:
+			// 静音轮询，避免刷屏
+		case 50114004:
+			return nil, fmt.Errorf("二维码已过期，请重试")
+		default:
+			qrLogger.Debugf("轮询状态: ret=%d msg=%s", c.Retcode, c.Msg)
+		}
+	}
+
+	return nil, fmt.Errorf("扫码超时（%v），请重试", timeout)
+}
+
 func pollQRCode(client *http.Client, qrid string) (*qrCheckResp, error) {
 	params := url.Values{}
 	params.Set("entry", "miniblog")
@@ -314,6 +482,12 @@ func printQRCode(imgData []byte) {
 
 // writeBackConfig writes SUB into application.yaml, touching only weibo.sub.
 func writeBackConfig(sub string) error {
+	return WriteBackConfig(sub)
+}
+
+// WriteBackConfig writes SUB into application.yaml, touching only weibo.sub.
+// This is the exported version for external callers.
+func WriteBackConfig(sub string) error {
 	cfgFile := config.GlobalConfig.ConfigFileUsed()
 	if cfgFile == "" {
 		cfgFile = "application.yaml"
@@ -352,9 +526,10 @@ func writeBackConfig(sub string) error {
 				inWeibo = false
 			} else {
 				// 在 weibo 块内
-				subLineRe := regexp.MustCompile(`^\s*sub:\s*`)
-				if subLineRe.MatchString(line) {
-					out = append(out, fmt.Sprintf("%s  sub: \"%s\"", indentWeibo, sub))
+				subLineRe := regexp.MustCompile(`^(\s*)sub:\s*`)
+				if matches := subLineRe.FindStringSubmatch(line); len(matches) > 1 {
+					// 保留原有缩进格式
+					out = append(out, fmt.Sprintf("%ssub: \"%s\"", matches[1], sub))
 					inserted = true
 					continue
 				}

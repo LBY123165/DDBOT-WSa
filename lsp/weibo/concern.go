@@ -140,11 +140,33 @@ func (c *Concern) Start() error {
 			profileResp, err := ApiContainerGetIndexProfile(testUid)
 			if err != nil {
 				logger.Errorf("微博 Cookie 验证失败 - Profile API: %v，微博功能可能无法正常使用", err)
+				// 等待 bot 上线后再发送告警
+				go func() {
+					for msg := range eventbus.BusObj.Subscribe("bot_online") {
+						if m, ok := msg.(bool); ok && m {
+							// bot 已上线，发送告警
+							if cfg.GetWeiboCookieAlertEnabled() {
+								sendCookieAlertToAllGroups(false)
+							}
+							return
+						}
+					}
+				}()
 				return
 			}
 
 			if profileResp.GetOk() != 1 {
 				logger.Errorf("微博 Cookie 验证失败 - Profile API 返回错误码: %v，微博功能可能无法正常使用", profileResp.GetOk())
+				go func() {
+					for msg := range eventbus.BusObj.Subscribe("bot_online") {
+						if m, ok := msg.(bool); ok && m {
+							if cfg.GetWeiboCookieAlertEnabled() {
+								sendCookieAlertToAllGroups(false)
+							}
+							return
+						}
+					}
+				}()
 				return
 			}
 
@@ -152,11 +174,31 @@ func (c *Concern) Start() error {
 			cardsResp, err := ApiContainerGetIndexCards(testUid)
 			if err != nil {
 				logger.Errorf("微博 Cookie 验证失败 - Cards API: %v，Cookie 可能已失效", err)
+				go func() {
+					for msg := range eventbus.BusObj.Subscribe("bot_online") {
+						if m, ok := msg.(bool); ok && m {
+							if cfg.GetWeiboCookieAlertEnabled() {
+								sendCookieAlertToAllGroups(false)
+							}
+							return
+						}
+					}
+				}()
 				return
 			}
 
 			if cardsResp.GetOk() != 1 {
 				logger.Errorf("微博 Cookie 验证失败 - Cards API 返回错误码: %v，Cookie 可能已失效", cardsResp.GetOk())
+				go func() {
+					for msg := range eventbus.BusObj.Subscribe("bot_online") {
+						if m, ok := msg.(bool); ok && m {
+							if cfg.GetWeiboCookieAlertEnabled() {
+								sendCookieAlertToAllGroups(false)
+							}
+							return
+						}
+					}
+				}()
 				return
 			}
 
