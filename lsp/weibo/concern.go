@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sora233/MiraiGo-Template/utils"
@@ -19,6 +20,26 @@ import (
 
 var online bool
 var logger = utils.GetModuleLogger("weibo-concern")
+
+// runtimeSUB 维护运行时 SUB，可被扫码登录更新，避免周期刷新使用过期值
+var (
+	runtimeSUB   string
+	runtimeSUBMu sync.RWMutex
+)
+
+// setRuntimeSUB 更新运行时 SUB
+func setRuntimeSUB(sub string) {
+	runtimeSUBMu.Lock()
+	runtimeSUB = sub
+	runtimeSUBMu.Unlock()
+}
+
+// getRuntimeSUB 获取当前运行时 SUB
+func getRuntimeSUB() string {
+	runtimeSUBMu.RLock()
+	defer runtimeSUBMu.RUnlock()
+	return runtimeSUB
+}
 
 type Concern struct {
 	*StateManager
@@ -104,6 +125,11 @@ func (c *Concern) Start() error {
 		}
 	}
 
+	// 初始化运行时 SUB（供周期刷新和扫码登录更新使用）
+	if sub != "" {
+		setRuntimeSUB(sub)
+	}
+
 	// API 模式：验证 API 连接是否正常
 	if isAPI {
 		testUid := int64(5462373877)
@@ -140,33 +166,14 @@ func (c *Concern) Start() error {
 			profileResp, err := ApiContainerGetIndexProfile(testUid)
 			if err != nil {
 				logger.Errorf("微博 Cookie 验证失败 - Profile API: %v，微博功能可能无法正常使用", err)
-				// 等待 bot 上线后再发送告警
-				go func() {
-					for msg := range eventbus.BusObj.Subscribe("bot_online") {
-						if m, ok := msg.(bool); ok && m {
-							// bot 已上线，发送告警
-							if cfg.GetWeiboCookieAlertEnabled() {
-								sendCookieAlertToAllGroups(false)
-							}
-							return
-						}
-					}
-				}()
+				// 等待 WS 就绪后发送告警（带超时，不依赖 bot_online 事件）
+				go waitForWSAndAlert(false)
 				return
 			}
 
 			if profileResp.GetOk() != 1 {
 				logger.Errorf("微博 Cookie 验证失败 - Profile API 返回错误码: %v，微博功能可能无法正常使用", profileResp.GetOk())
-				go func() {
-					for msg := range eventbus.BusObj.Subscribe("bot_online") {
-						if m, ok := msg.(bool); ok && m {
-							if cfg.GetWeiboCookieAlertEnabled() {
-								sendCookieAlertToAllGroups(false)
-							}
-							return
-						}
-					}
-				}()
+				go waitForWSAndAlert(false)
 				return
 			}
 
@@ -174,31 +181,13 @@ func (c *Concern) Start() error {
 			cardsResp, err := ApiContainerGetIndexCards(testUid)
 			if err != nil {
 				logger.Errorf("微博 Cookie 验证失败 - Cards API: %v，Cookie 可能已失效", err)
-				go func() {
-					for msg := range eventbus.BusObj.Subscribe("bot_online") {
-						if m, ok := msg.(bool); ok && m {
-							if cfg.GetWeiboCookieAlertEnabled() {
-								sendCookieAlertToAllGroups(false)
-							}
-							return
-						}
-					}
-				}()
+				go waitForWSAndAlert(false)
 				return
 			}
 
 			if cardsResp.GetOk() != 1 {
 				logger.Errorf("微博 Cookie 验证失败 - Cards API 返回错误码: %v，Cookie 可能已失效", cardsResp.GetOk())
-				go func() {
-					for msg := range eventbus.BusObj.Subscribe("bot_online") {
-						if m, ok := msg.(bool); ok && m {
-							if cfg.GetWeiboCookieAlertEnabled() {
-								sendCookieAlertToAllGroups(false)
-							}
-							return
-						}
-					}
-				}()
+				go waitForWSAndAlert(false)
 				return
 			}
 
@@ -215,10 +204,12 @@ func (c *Concern) Start() error {
 	}
 
 	// Login/Guest 模式每小时刷新 Cookie（API 模式不需要）
+	// 使用运行时 SUB 而非启动时捕获的值，避免扫码登录后被旧值覆盖
 	if !isAPI {
 		go func() {
 			for range time.Tick(time.Hour) {
-				freshCookieOpt(sub)
+				currentSub := getRuntimeSUB()
+				freshCookieOpt(currentSub)
 			}
 		}()
 	}
@@ -227,7 +218,6 @@ func (c *Concern) Start() error {
 		interval := cfg.GetEmitIntervalForSite("weibo")
 		if interval > 0 && interval < time.Minute {
 			logger.Warnf("微博 Guest 模式 interval 配置低于最低限制 60s，已自动调整为 60s")
-			// 注意：此处仅提示，不修改配置。用户需自行调整 weibo.interval
 		}
 	}
 	// 使用 EmitQueue 进行轮询，间隔由 weibo.interval 配置控制
@@ -275,6 +265,29 @@ func (c *Concern) Stop() {
 	c.StateManager.Stop()
 	logger.Tracef("%v StateManager 已停止", Site)
 	logger.Tracef("%v concern 已停止", Site)
+}
+
+// waitForWSAndAlert 等待 WS 就绪后发送 Cookie 告警，带 5 分钟超时
+// 不依赖 bot_online 事件，直接轮询 WS 连接状态
+func waitForWSAndAlert(isRecovery bool) {
+	timeout := time.After(5 * time.Minute)
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if canDeliverMessage() {
+				if cfg.GetWeiboCookieAlertEnabled() {
+					sendCookieAlertToAllGroups(isRecovery)
+				}
+				return
+			}
+		case <-timeout:
+			logger.Warn("等待 WS 就绪超时（5分钟），Cookie 告警未发送")
+			return
+		}
+	}
 }
 
 func (c *Concern) Add(ctx mmsg.IMsgCtx, groupCode int64, _id interface{}, ctype concern_type.Type) (concern.IdentityInfo, error) {

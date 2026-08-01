@@ -362,7 +362,17 @@ func (c *LspPrivateCommand) WbLoginCommand() {
 
 			if result.Sub != "" {
 				log.Infof("微博扫码登录成功，SUB: %s...", result.Sub[:min(20, len(result.Sub))])
-				c.textReply("微博扫码登录成功！\nSUB 已写入配置文件并立即生效。")
+				// 根据 RuntimeLoaded 和 PersistSuccess 分别回复
+				var msg string
+				switch {
+				case result.RuntimeLoaded && result.PersistSuccess:
+					msg = "微博扫码登录成功！\nSUB 已写入配置文件并立即生效。"
+				case result.RuntimeLoaded && !result.PersistSuccess:
+					msg = fmt.Sprintf("微博扫码登录成功！\n运行时已生效，但配置文件写入失败：%v\n请手动将 SUB 写入 application.yaml -> weibo.sub", result.PersistError)
+				case !result.RuntimeLoaded:
+					msg = "微博扫码登录成功，但运行时加载失败，请重启程序。"
+				}
+				c.textReply(msg)
 				return
 			}
 		}

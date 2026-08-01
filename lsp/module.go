@@ -942,12 +942,16 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	// 等待 bot 上线后再启动订阅系统，避免 not connected 和 nil group info 错误
 	go func() {
 		logger.Info("等待 bot 上线后再启动订阅系统...")
-		for !bot.Online.Load() {
+		for bot.Messenger == nil || !bot.Messenger.Online.Load() {
 			time.Sleep(time.Second)
 		}
-		// bot 已上线，等待群列表加载完成
-		time.Sleep(3 * time.Second)
-		logger.Info("bot 已上线，启动订阅系统")
+		// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
+		// Messenger 为 nil 时继续等待，避免在关闭流程中误触发 StartAll
+		logger.Info("bot 已上线，等待群列表加载完成...")
+		for bot.Messenger == nil || !bot.Messenger.IsListLoaded() {
+			time.Sleep(time.Second)
+		}
+		logger.Info("群列表加载完成，启动订阅系统")
 		concern.StartAll()
 		l.started.Store(true)
 		logger.Infof("DDBOT启动完成")
@@ -1172,7 +1176,7 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with nil private message")
 		return &adapter.PrivateMessage{ID: -1}
 	}
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
+	if bot.Instance == nil || bot.Instance.Messenger == nil || !bot.Instance.Messenger.Online.Load() {
 		return &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
 	}
 	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {

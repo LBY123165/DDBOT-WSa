@@ -41,6 +41,7 @@ func init() {
 
 			// 检查 SUB 是否有效（仅 Login 模式）
 			subValid := true
+			subNetErr := false
 			if !isGuestMode() {
 				sub := GetSettingCookie()
 				if sub == "" {
@@ -49,7 +50,7 @@ func init() {
 					sub = extractCookieValue(opts, "SUB")
 				}
 				if sub != "" {
-					subValid = isSUBValid()
+					subValid, subNetErr = isSUBValidDetailed()
 				}
 			}
 
@@ -64,6 +65,12 @@ func init() {
 			}
 			// Cookie 不健康或 SUB 失效：尝试刷新
 			refreshed := ForceFreshCookie()
+			if refreshed {
+				// 刷新成功后重新验证 SUB，避免使用刷新前的过期判断
+				if !isGuestMode() {
+					subValid, subNetErr = isSUBValidDetailed()
+				}
+			}
 			if refreshed && subValid {
 				if lastAlertSent {
 					// 刷新成功且 SUB 有效，发送恢复通知
@@ -71,7 +78,12 @@ func init() {
 				}
 				lastAlertSent = false
 			} else if !lastAlertSent {
-				// 刷新失败或 SUB 失效且尚未发过告警，发送告警通知
+				// 网络错误时 SUB 状态未知，不发送告警，等待下一轮再检查
+				if subNetErr {
+					logger.Debug("Cookie/SUB 检测遇到网络错误，跳过本次告警")
+					continue
+				}
+				// 刷新失败或 SUB 明确失效且尚未发过告警，发送告警通知
 				if cfg.GetWeiboCookieAlertEnabled() {
 					sendCookieAlertToAllGroups(false)
 					lastAlertSent = true
@@ -181,6 +193,27 @@ func isSUBValid() bool {
 	return true
 }
 
+// isSUBValidDetailed 检测当前 SUB 是否有效，并区分网络错误和鉴权失效
+// 返回值: (valid, networkError)
+// - valid=true: SUB 有效
+// - valid=false, networkError=true: 网络错误，SUB 状态未知
+// - valid=false, networkError=false: 明确的鉴权失效
+func isSUBValidDetailed() (bool, bool) {
+	testUid := int64(5462373877)
+	profileResp, err := ApiContainerGetIndexProfile(testUid)
+	if err != nil {
+		// 网络错误（DNS、超时、连接拒绝等），SUB 状态未知
+		logger.Debugf("SUB 有效性检测遇到网络错误: %v", err)
+		return false, true
+	}
+	if profileResp.GetOk() != 1 {
+		// API 返回了响应但状态码非 1，说明 SUB 鉴权失效
+		logger.Debugf("SUB 有效性检测失败 - Profile API 返回错误码: %v", profileResp.GetOk())
+		return false, false
+	}
+	return true, false
+}
+
 // getBotAdmins 从 buntdb Permission 索引查询所有 bot 管理员 QQ
 func getBotAdmins() []int64 {
 	var admins []int64
@@ -231,21 +264,37 @@ func sendCookieAlertToAllGroups(isRecovery bool) {
 	)
 }
 
+// canDeliverMessage 检查当前是否可以投递消息（WS 在线或已启用离线队列）
+func canDeliverMessage() bool {
+	if bot.Instance == nil || bot.Instance.Messenger == nil {
+		return false
+	}
+	if bot.Instance.Messenger.Online.Load() {
+		return true
+	}
+	// WS 离线时，检查是否启用了离线队列
+	return config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+}
+
 // sendPrivateAlert 私聊发送 Cookie 告警
 // 使用 -qq 作为 key，避免与群号冲突（群号为正数）
 func sendPrivateAlert(qq int64, isRecovery bool) {
 	alertKey := c.StateManager.CookieAlertKey(-qq)
 	if !isRecovery {
-		err := c.StateManager.Set(alertKey, "",
-			localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
-		if err != nil {
+		// 先检查去重：如果最近已发过告警，跳过
+		if _, err := localdb.Get(alertKey); err == nil {
 			logger.WithField("QQ", qq).Debug("微博 Cookie 告警已在 2 小时内发送过，跳过")
 			return
 		}
 	} else {
 		_, _ = c.StateManager.Delete(alertKey)
-		// 恢复时清除 SUB 过期告警的去重状态
 		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq))
+	}
+
+	// 检查是否可以投递消息（WS 在线或离线队列已启用）
+	if !canDeliverMessage() {
+		logger.WithField("QQ", qq).Warn("Bot WS 未在线且未启用离线队列，无法发送私聊告警")
+		return
 	}
 
 	notify := NewCookieAlertNotify(0, isRecovery)
@@ -253,11 +302,19 @@ func sendPrivateAlert(qq int64, isRecovery bool) {
 	sm := m.ToCombineMessage(mmsg.NewPrivateTarget(qq))
 	summary := msgstringer.AdapterMsgToString(sm.Elements)
 
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
-		logger.WithField("QQ", qq).Warn("Bot 未在线，无法发送私聊告警")
-		return
+	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
+
+	// 仅在发送成功或确认进入离线队列后设置告警去重标记
+	// WS 在线时 ID==-1 表示发送失败，不设置去重以便重试
+	// WS 离线时 ID==-1 表示已进入离线队列，视为成功
+	if !isRecovery {
+		if bot.Instance.Messenger.Online.Load() && resp.ID == -1 {
+			logger.WithField("QQ", qq).Warn("私聊告警发送失败，不设置去重标记以便重试")
+		} else {
+			_ = c.StateManager.Set(alertKey, "",
+				localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
+		}
 	}
-	bot.Instance.SendPrivateMessage(qq, sm, summary)
 	logger.WithField("QQ", qq).WithField("IsRecovery", isRecovery).Info("已发送微博 Cookie 告警私聊")
 }
 
@@ -265,33 +322,43 @@ func sendPrivateAlert(qq int64, isRecovery bool) {
 func sendGroupAlert(groupCode int64, isRecovery bool) {
 	alertKey := c.StateManager.CookieAlertKey(groupCode)
 	if !isRecovery {
-		err := c.StateManager.Set(alertKey, "",
-			localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
-		if err != nil {
+		// 先检查去重：如果最近已发过告警，跳过
+		if _, err := localdb.Get(alertKey); err == nil {
 			logger.WithField("GroupCode", groupCode).
 				Debug("微博 Cookie 告警已在 2 小时内发送过，跳过")
 			return
 		}
 	} else {
 		_, _ = c.StateManager.Delete(alertKey)
-		// 恢复时清除 SUB 过期告警的去重状态
 		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(groupCode))
 	}
 
-	// 直接发送消息到群，而不是通过通知机制
-	// 因为 CookieAlert 类型不在 Types() 返回的列表中，通过通知机制无法发送到群
+	// 检查是否可以投递消息（WS 在线或离线队列已启用）
+	if !canDeliverMessage() {
+		logger.WithField("GroupCode", groupCode).
+			Warn("Bot WS 未在线且未启用离线队列，无法发送群告警")
+		return
+	}
+
 	notify := NewCookieAlertNotify(groupCode, isRecovery)
 	m := notify.ToMessage()
-	if bot.Instance != nil && bot.Instance.Online.Load() {
-		sm := m.ToCombineMessage(mmsg.NewGroupTarget(groupCode))
-		summary := msgstringer.AdapterMsgToString(sm.Elements)
-		bot.Instance.SendGroupMessage(groupCode, sm, summary)
+	sm := m.ToCombineMessage(mmsg.NewGroupTarget(groupCode))
+	summary := msgstringer.AdapterMsgToString(sm.Elements)
+	resp := bot.Instance.SendGroupMessage(groupCode, sm, summary)
+
+	// 仅在发送成功或确认进入离线队列后设置告警去重标记
+	if !isRecovery && resp.Error == nil {
+		_ = c.StateManager.Set(alertKey, "",
+			localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
+	}
+	if resp.Error != nil {
+		logger.WithField("GroupCode", groupCode).
+			WithField("IsRecovery", isRecovery).
+			Errorf("发送微博 Cookie 告警通知到群失败: %v", resp.Error)
+	} else {
 		logger.WithField("GroupCode", groupCode).
 			WithField("IsRecovery", isRecovery).
 			Info("已发送微博 Cookie 告警通知到群")
-	} else {
-		logger.WithField("GroupCode", groupCode).
-			Warn("Bot 未在线，无法发送群告警")
 	}
 }
 
@@ -431,17 +498,27 @@ func sendSUBExpiredAlert(qq int64) {
 		return
 	}
 
+	// 检查是否可以投递消息
+	if !canDeliverMessage() {
+		logger.WithField("QQ", qq).Warn("Bot WS 未在线且未启用离线队列，无法发送私聊告警")
+		// 发送失败，清除去重标记以便下次重试
+		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq))
+		return
+	}
+
 	notify := NewSUBExpiredNotify(0)
 	m := notify.ToMessage()
 	sm := m.ToCombineMessage(mmsg.NewPrivateTarget(qq))
 	summary := msgstringer.AdapterMsgToString(sm.Elements)
 
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
-		logger.WithField("QQ", qq).Warn("Bot 未在线，无法发送私聊告警")
-		return
+	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
+
+	if bot.Instance.Messenger.Online.Load() && resp.ID == -1 {
+		logger.WithField("QQ", qq).Warn("SUB 过期告警发送失败，清除去重标记以便重试")
+		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq))
+	} else {
+		logger.WithField("QQ", qq).Info("已发送微博 SUB 过期告警私聊")
 	}
-	bot.Instance.SendPrivateMessage(qq, sm, summary)
-	logger.WithField("QQ", qq).Info("已发送微博 SUB 过期告警私聊")
 }
 
 // sendSUBExpiredGroupAlert 群发 SUB 过期告警
@@ -450,18 +527,28 @@ func sendSUBExpiredGroupAlert(groupCode int64) {
 		return
 	}
 
-	notify := NewSUBExpiredNotify(groupCode)
-	// 直接发送消息到群，而不是通过通知机制
-	// 因为 CookieAlert 类型不在 Types() 返回的列表中，通过通知机制无法发送到群
-	m := notify.ToMessage()
-	if bot.Instance != nil && bot.Instance.Online.Load() {
-		sm := m.ToCombineMessage(mmsg.NewGroupTarget(groupCode))
-		summary := msgstringer.AdapterMsgToString(sm.Elements)
-		bot.Instance.SendGroupMessage(groupCode, sm, summary)
+	// 检查是否可以投递消息
+	if !canDeliverMessage() {
 		logger.WithField("GroupCode", groupCode).
-			Info("已发送微博 SUB 过期告警通知到群")
+			Warn("Bot WS 未在线且未启用离线队列，无法发送群告警")
+		// 发送失败，清除去重标记以便下次重试
+		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(groupCode))
+		return
+	}
+
+	notify := NewSUBExpiredNotify(groupCode)
+	m := notify.ToMessage()
+	sm := m.ToCombineMessage(mmsg.NewGroupTarget(groupCode))
+	summary := msgstringer.AdapterMsgToString(sm.Elements)
+	resp := bot.Instance.SendGroupMessage(groupCode, sm, summary)
+
+	if resp.Error != nil {
+		logger.WithField("GroupCode", groupCode).
+			Errorf("发送微博 SUB 过期告警通知到群失败: %v", resp.Error)
+		// 发送失败，清除去重标记以便下次重试
+		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(groupCode))
 	} else {
 		logger.WithField("GroupCode", groupCode).
-			Warn("Bot 未在线，无法发送群告警")
+			Info("已发送微博 SUB 过期告警通知到群")
 	}
 }

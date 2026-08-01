@@ -8,10 +8,14 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	ob11 "github.com/cnxysoft/DDBOT-WSa/adapter/onebot-v11"
 	"github.com/cnxysoft/DDBOT-WSa/adapter/satori"
+	"github.com/cnxysoft/DDBOT-WSa/lsp/eventbus"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/sirupsen/logrus"
 	"go.uber.org/atomic"
 )
+
+// reconnectStop 用于通知重连监控协程退出
+var reconnectStop chan struct{}
 
 type Bot struct {
 	*adapter.Messenger
@@ -334,12 +338,43 @@ func Init() {
 		}
 	}()
 
+	// 监控 WS 重连，重连后重新发布 bot_online 事件
+	reconnectStop = make(chan struct{})
+	go func() {
+		// 等待首次上线
+		for !messenger.Online.Load() {
+			select {
+			case <-reconnectStop:
+				return
+			case <-time.After(time.Second):
+			}
+		}
+		wasOnline := true
+		ticker := time.NewTicker(time.Second * 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-reconnectStop:
+				return
+			case <-ticker.C:
+				nowOnline := messenger.Online.Load()
+				if nowOnline && !wasOnline {
+					logger.Info("Bot reconnected, publishing bot_online event")
+					eventbus.BusObj.Publish("bot_online", true)
+				}
+				wasOnline = nowOnline
+			}
+		}
+	}()
+
 	logger.Infof("%s adapter initialized", adapterType)
 }
 
 func botOnline() {
 	logger.Infof("Bot online: %d", Instance.Uin)
 	Instance.Online.Store(true)
+	// 发布 bot_online 事件，通知所有订阅模块（weibo/bilibili/acfun 等）
+	eventbus.BusObj.Publish("bot_online", true)
 }
 
 func refreshList() {
@@ -404,6 +439,9 @@ func StartService() {
 
 func Stop() {
 	logger.Warn("stopping ...")
+	if reconnectStop != nil {
+		close(reconnectStop)
+	}
 	wg := sync.WaitGroup{}
 	for _, mi := range modules {
 		wg.Add(1)

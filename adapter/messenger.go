@@ -92,6 +92,9 @@ type Messenger struct {
 	// 离线消息队列
 	offlineQueue   []offlineQueueMsg
 	offlineQueueMu sync.Mutex
+
+	// listLoaded 标记好友/群/群成员列表是否已完成首次加载
+	listLoaded atomic.Bool
 }
 
 func NewMessenger(adapter Adapter) *Messenger {
@@ -1061,7 +1064,20 @@ func (m *Messenger) RefreshList() error {
 
 	messengerLogger.Infof("已加载 %d 个群成员", totalMembers)
 
+	// 标记列表加载完成，供等待启动的模块使用
+	m.listLoaded.Store(true)
+
 	return nil
+}
+
+// IsListLoaded 返回好友/群/群成员列表是否已完成首次加载
+func (m *Messenger) IsListLoaded() bool {
+	return m.listLoaded.Load()
+}
+
+// IsConnected 返回当前 WS 连接是否在线（基于心跳状态）
+func (m *Messenger) IsConnected() bool {
+	return m.Online.Load()
 }
 
 func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {

@@ -152,9 +152,12 @@ func fetchQRCode(client *http.Client, opt QRLoginOption) (string, error) {
 
 // QRLoginResult 扫码登录结果
 type QRLoginResult struct {
-	QRCodeImage []byte // 二维码图片数据
-	Sub         string // 登录成功后的 SUB
-	Error       error  // 错误信息
+	QRCodeImage    []byte // 二维码图片数据
+	Sub            string // 登录成功后的 SUB
+	Error          error  // 错误信息
+	RuntimeLoaded  bool   // 运行时 Cookie 是否已加载到内存
+	PersistSuccess bool   // 配置文件是否持久化成功
+	PersistError   error  // 持久化错误信息（若 PersistSuccess 为 false）
 }
 
 // RunQRLoginForQQ 为 QQ 扫码登录优化的版本
@@ -200,15 +203,25 @@ func RunQRLoginForQQ(timeout time.Duration) (<-chan QRLoginResult, error) {
 			return
 		}
 
-	// 写入配置文件
-	if err := WriteBackConfig(sub); err != nil {
-		qrLogger.Warnf("SUB 已获取，但写入配置失败: %v", err)
-	}
+		// 分别处理运行时加载和配置持久化
+		result := QRLoginResult{Sub: sub}
 
-	// 立即加载新 SUB 到内存，无需重启
-	freshCookieOpt(sub)
+		// 1. 运行时加载：更新运行时 SUB 并加载 Cookie 到内存
+		setRuntimeSUB(sub)
+		freshCookieOpt(sub)
+		result.RuntimeLoaded = true
 
-	resultChan <- QRLoginResult{Sub: sub}
+		// 2. 配置持久化：写回 application.yaml
+		if err := WriteBackConfig(sub); err != nil {
+			qrLogger.Warnf("SUB 已获取，但写入配置失败: %v", err)
+			result.PersistError = err
+			result.PersistSuccess = false
+		} else {
+			qrLogger.Infof("已写入配置 weibo.sub 并保存到 application.yaml")
+			result.PersistSuccess = true
+		}
+
+		resultChan <- result
 	}()
 
 	return resultChan, nil
@@ -399,14 +412,7 @@ func finalizeLogin(client *http.Client, raw *qrCheckResp, outputDir string) (str
 	if sub == "" {
 		return "", fmt.Errorf("未找到SUB cookie")
 	}
-	subPath := filepath.Join(outputDir, "weibo_sub.txt")
-	_ = os.WriteFile(subPath, []byte(sub), 0o644)
-	qrLogger.Infof("SUB 已保存到: %s", subPath)
-	if err := writeBackConfig(sub); err != nil {
-		qrLogger.Warnf("SUB 已获取，但写回配置失败: %v (请手动写入 application.yaml weibo.sub)", err)
-	} else {
-		qrLogger.Infof("已写入配置 weibo.sub 并保存到 application.yaml")
-	}
+	qrLogger.Infof("SUB 已获取")
 	return sub, nil
 }
 
@@ -480,27 +486,34 @@ func printQRCode(imgData []byte) {
 	_, _ = colorable.NewColorableStdout().Write(buf)
 }
 
-// writeBackConfig writes SUB into application.yaml, touching only weibo.sub.
-func writeBackConfig(sub string) error {
-	return WriteBackConfig(sub)
-}
-
 // WriteBackConfig writes SUB into application.yaml, touching only weibo.sub.
-// This is the exported version for external callers.
+// Uses temp file + atomic rename to prevent corruption, preserving original file permissions.
 func WriteBackConfig(sub string) error {
 	cfgFile := config.GlobalConfig.ConfigFileUsed()
 	if cfgFile == "" {
 		cfgFile = "application.yaml"
 	}
-	data, err := os.ReadFile(cfgFile)
+	return writeBackConfigToPath(sub, cfgFile)
+}
+
+// writeBackConfigToPath writes SUB into the config file at cfgPath using atomic rename.
+// It touches only the weibo.sub field and preserves all other content and file permissions.
+func writeBackConfigToPath(sub string, cfgPath string) error {
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return err
+	}
+
+	// 保留原文件权限
+	var fileMode os.FileMode = 0o644
+	if info, err := os.Stat(cfgPath); err == nil {
+		fileMode = info.Mode()
 	}
 
 	content := string(data)
 	lines := strings.Split(content, "\n")
 
-	// Line-by-line rewrite to avoid touching其他块
+	// Line-by-line rewrite to avoid touching other blocks
 	var out []string
 	inWeibo := false
 	indentWeibo := ""
@@ -553,5 +566,17 @@ func WriteBackConfig(sub string) error {
 		out = append(out, fmt.Sprintf("  sub: \"%s\"", sub))
 	}
 
-	return os.WriteFile(cfgFile, []byte(strings.Join(out, "\n")), 0o644)
+	newData := []byte(strings.Join(out, "\n"))
+
+	// 使用临时文件 + 原子替换，避免写入中途崩溃导致配置损坏
+	tmpFile := cfgPath + ".tmp"
+	if err := os.WriteFile(tmpFile, newData, fileMode); err != nil {
+		return fmt.Errorf("写入临时文件失败: %w", err)
+	}
+	if err := os.Rename(tmpFile, cfgPath); err != nil {
+		_ = os.Remove(tmpFile)
+		return fmt.Errorf("原子替换配置文件失败: %w", err)
+	}
+
+	return nil
 }
