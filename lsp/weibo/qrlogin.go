@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Sora233/MiraiGo-Template/config"
@@ -55,7 +56,7 @@ var (
 )
 
 // RunQRLogin downloads a QR code, waits for scan, exchanges ALT for cookies, and returns SUB.
-// It also saves the QR image to outputDir/weibo_debug.png and SUB to outputDir/weibo_sub.txt.
+// It also saves the QR image to outputDir/weibo_debug.png.
 func RunQRLogin(opt QRLoginOption) (string, error) {
 	if opt.OutputDir == "" {
 		opt.OutputDir = "."
@@ -486,6 +487,9 @@ func printQRCode(imgData []byte) {
 	_, _ = colorable.NewColorableStdout().Write(buf)
 }
 
+// writeBackConfigMu 保护配置文件写操作，防止并发 read-modify-write 导致丢失更新
+var writeBackConfigMu sync.Mutex
+
 // WriteBackConfig writes SUB into application.yaml, touching only weibo.sub.
 // Uses temp file + atomic rename to prevent corruption, preserving original file permissions.
 func WriteBackConfig(sub string) error {
@@ -493,6 +497,8 @@ func WriteBackConfig(sub string) error {
 	if cfgFile == "" {
 		cfgFile = "application.yaml"
 	}
+	writeBackConfigMu.Lock()
+	defer writeBackConfigMu.Unlock()
 	return writeBackConfigToPath(sub, cfgFile)
 }
 
