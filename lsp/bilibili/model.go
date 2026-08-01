@@ -53,6 +53,7 @@ type ConcernNewsNotify struct {
 	// 用于联合投稿和转发的时候防止多人同时推送
 	shouldCompact bool
 	compactKey    string
+	compactReady  bool
 	concern       *Concern
 }
 
@@ -294,11 +295,19 @@ func (notify *ConcernNewsNotify) ToMessage() (m *mmsg.MSG) {
 	)
 	// 推送一条简化动态防止刷屏，主要是联合投稿和转发的时候
 	if notify.shouldCompact {
-		// 通过回复之前消息的方式简化推送
-		m = mmsg.NewMSG()
-		msg, _ := notify.concern.GetNotifyMsg(notify.GroupCode, notify.compactKey)
-		if msg != nil {
+		if !notify.compactReady {
+			// FilterHook may already have rendered and cached the full message.
+			// Prepare compact state and invalidate that cache before rendering again.
+			msg, err := notify.concern.GetNotifyMsg(notify.GroupCode, notify.compactKey)
 			card.orgMsg = msg
+			card.compactMiss = msg == nil
+			card.resetRenderCache()
+			notify.compactReady = true
+			if msg == nil {
+				log.WithField("group_code", notify.GroupCode).
+					WithField("compact_key", notify.compactKey).
+					Warnf("compact notify miss: reply msg not found, suppress origin content (err: %v)", err)
+			}
 		}
 		log.WithField("compact_key", notify.compactKey).Debug("compact notify")
 	}
@@ -438,18 +447,28 @@ func urlsMergeImage(urls []string) (result []byte, err error) {
 
 type CacheCard struct {
 	*Card
-	GroupCode  int64
-	once       sync.Once
-	msgCache   *mmsg.MSG
-	dynamic    DynamicInfo
-	dynamicRaw map[string]interface{}
-	orgMsg     *adapter.GroupMessage
+	GroupCode   int64
+	prepareOnce sync.Once
+	renderOnce  sync.Once
+	msgCache    *mmsg.MSG
+	dynamic     DynamicInfo
+	dynamicRaw  map[string]interface{}
+	orgMsg      *adapter.GroupMessage
+	// compactMiss 表示本条动态需要紧凑推送（shouldCompact），
+	// 但没能从数据库取到可回复的原消息。
+	// 用于让模板区分「首次推送」与「应压缩却查不到原消息」两种 orgMsg == nil 的情况。
+	compactMiss bool
 }
 
 func NewCacheCard(card *Card) *CacheCard {
 	cacheCard := new(CacheCard)
 	cacheCard.Card = card
 	return cacheCard
+}
+
+func (c *CacheCard) resetRenderCache() {
+	c.renderOnce = sync.Once{}
+	c.msgCache = nil
 }
 
 type DynamicInfo struct {
@@ -1200,14 +1219,15 @@ func (c *CacheCard) prepare() {
 }
 
 func (c *CacheCard) GetMSG() *mmsg.MSG {
-	c.once.Do(func() {
-		c.prepare()
+	c.prepareOnce.Do(c.prepare)
+	c.renderOnce.Do(func() {
 		var data = map[string]interface{}{
-			"dynamic":     c.dynamic,
-			"msg":         c.orgMsg,
-			"group_code":  c.GroupCode,
-			"parse_post":  config.GlobalConfig.GetBool("bilibili.autoParsePosts"),
-			"dynamic_raw": c.dynamicRaw,
+			"dynamic":      c.dynamic,
+			"msg":          c.orgMsg,
+			"compact_miss": c.compactMiss,
+			"group_code":   c.GroupCode,
+			"parse_post":   config.GlobalConfig.GetBool("bilibili.autoParsePosts"),
+			"dynamic_raw":  c.dynamicRaw,
 		}
 		var err error
 		c.msgCache, err = template.LoadAndExec("notify.group.bilibili.news.tmpl", data)
