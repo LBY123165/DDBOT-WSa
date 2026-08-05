@@ -104,7 +104,9 @@ func Init() {
 		logger.Info("B站扫码登陆已开启")
 		go func() {
 			for {
-				GetQRResp, err := GetQRCode()
+				// 创建扫码会话，预访问 bilibili.com 获取 buvid3/buvid4
+				session := NewQRLoginSession()
+				GetQRResp, err := GetQRCode(session)
 				if err != nil {
 					logger.Errorf("生成登陆二维码失败 - %v", err)
 					time.Sleep(time.Second * 5)
@@ -113,34 +115,50 @@ func Init() {
 				logger.Info("已生成二维码，请扫码登陆~")
 				for {
 					time.Sleep(time.Second * 5)
-					CheckResp, err := QRLoginCheck(GetQRResp.Data.QrcodeKey)
+					CheckResp, err := QRLoginCheck(session, GetQRResp.Data.QrcodeKey)
 					if err != nil {
-						if err.Error() == "二维码已失效" {
-							logger.Warnf("%v - 重新生成二维码", err)
-							break
+						logger.Errorf("轮询扫码状态失败 - %v", err)
+						continue
+					}
+					switch CheckResp.Data.Code {
+					case QRPollSuccess:
+						// 登录成功，优先从 cookie jar 提取，fallback 从 data.url 提取
+						cookies, err := GetCookiesFromJar(session)
+						if err != nil {
+							logger.Warnf("从 cookie jar 提取失败，尝试从 data.url 提取: %v", err)
+							cookies, err = GetCookies(CheckResp.Data.Url)
+							if err != nil {
+								logger.Errorf("解析 Cookies 失败 - %v", err)
+								continue
+							}
 						}
-						continue
+						config.GlobalConfig.Set("bilibili.SESSDATA", cookies.SESSDATA)
+						config.GlobalConfig.Set("bilibili.bili_jct", cookies.BILI_JCT)
+						if err := cfg.WriteConfigKeyValue("bilibili.SESSDATA", cookies.SESSDATA); err != nil {
+							logger.Errorf("保存 SESSDATA 到配置文件失败 - %v", err)
+						}
+						if err := cfg.WriteConfigKeyValue("bilibili.bili_jct", cookies.BILI_JCT); err != nil {
+							logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
+						}
+						SetVerify(cookies.SESSDATA, cookies.BILI_JCT)
+						FreshSelfInfo()
+						logger.Info("B站扫码登陆成功，请重启DDBOT-WSa")
+						logger.Info("正在退出...")
+						time.Sleep(time.Second * 5)
+						os.Exit(0)
+					case QRPollExpired:
+						logger.Warn("二维码已失效，重新生成二维码")
+						goto regenerate
+					case QRPollWaiting:
+						// 等待扫码，继续轮询
+					case QRPollScanned:
+						// 已扫码，等待确认，继续轮询
+					default:
+						logger.Errorf("扫码异常状态: code=%d message=%s", CheckResp.Data.Code, CheckResp.Data.Message)
+						goto regenerate
 					}
-					cookies, err := GetCookies(CheckResp.Data.Url)
-					if err != nil {
-						logger.Errorf("解析Cookies失败 - %v", err)
-						continue
-					}
-					config.GlobalConfig.Set("bilibili.SESSDATA", cookies.SESSDATA)
-					config.GlobalConfig.Set("bilibili.bili_jct", cookies.BILI_JCT)
-					if err := cfg.WriteConfigKeyValue("bilibili.SESSDATA", cookies.SESSDATA); err != nil {
-						logger.Errorf("保存 SESSDATA 到配置文件失败 - %v", err)
-					}
-					if err := cfg.WriteConfigKeyValue("bilibili.bili_jct", cookies.BILI_JCT); err != nil {
-						logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
-					}
-					SetVerify(cookies.SESSDATA, cookies.BILI_JCT)
-					FreshSelfInfo()
-					logger.Info("B站扫码登陆成功，请重启DDBOT-WSa")
-					logger.Info("正在退出...")
-					time.Sleep(time.Second * 5)
-					os.Exit(0)
 				}
+			regenerate:
 			}
 		}()
 	}

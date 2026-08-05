@@ -50,6 +50,10 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var Debug = false
 
+// SkipOnlineCheck 为 true 时跳过等待 bot 上线，直接启动订阅系统
+// 通过启动参数 --online 设置，用于调试或无 WS 连接的场景
+var SkipOnlineCheck = false
+
 type Lsp struct {
 	pool          image_pool.Pool
 	concernNotify <-chan concern.Notify
@@ -941,28 +945,33 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 
 	// 等待 bot 上线后再启动订阅系统，避免 not connected 和 nil group info 错误
 	go func() {
-		const startupTimeout = 5 * time.Minute
-		deadline := time.Now().Add(startupTimeout)
+		if SkipOnlineCheck {
+			logger.Warn("本次启动已跳过 bot 上线等待流程（--online）")
+		} else {
+			const startupTimeout = 5 * time.Minute
+			deadline := time.Now().Add(startupTimeout)
 
-		logger.Info("等待 bot 上线后再启动订阅系统...")
-		for bot.Messenger == nil || !bot.Messenger.Online.Load() {
-			if time.Now().After(deadline) {
-				logger.Errorf("等待 bot 上线超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
-				return
+			logger.Info("等待 bot 上线后再启动订阅系统...")
+			for bot.Messenger == nil || !bot.Messenger.Online.Load() {
+				if time.Now().After(deadline) {
+					logger.Errorf("等待 bot 上线超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
+					return
+				}
+				time.Sleep(time.Second)
 			}
-			time.Sleep(time.Second)
-		}
-		// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
-		// Messenger 为 nil 时继续等待，避免在关闭流程中误触发 StartAll
-		logger.Info("bot 已上线，等待群列表加载完成...")
-		for bot.Messenger == nil || !bot.Messenger.IsListLoaded() {
-			if time.Now().After(deadline) {
-				logger.Errorf("等待群列表加载超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
-				return
+			// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
+			// Messenger 为 nil 时继续等待，避免在关闭流程中误触发 StartAll
+			logger.Info("bot 已上线，等待群列表加载完成...")
+			for bot.Messenger == nil || !bot.Messenger.IsListLoaded() {
+				if time.Now().After(deadline) {
+					logger.Errorf("等待群列表加载超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
+					return
+				}
+				time.Sleep(time.Second)
 			}
-			time.Sleep(time.Second)
+			logger.Info("群列表加载完成，启动订阅系统")
 		}
-		logger.Info("群列表加载完成，启动订阅系统")
+
 		concern.StartAll()
 		l.started.Store(true)
 		logger.Infof("DDBOT启动完成")
