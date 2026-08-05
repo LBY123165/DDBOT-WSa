@@ -112,9 +112,16 @@ func (c *Concern) Start() error {
 					return nil
 				}
 				sub = obtained
-				logger.Infof("扫码登录成功，已获取 SUB。请写入 application.yaml -> weibo.sub 以便下次启动：%s", sub)
+				// 扫码成功后尝试持久化到配置文件
+				if err := WriteBackConfig(sub); err != nil {
+					logger.Warnf("扫码登录成功，但写入配置失败: %v，请手动写入 application.yaml -> weibo.sub", err)
+				} else {
+					logger.Infof("扫码登录成功，已写入 application.yaml -> weibo.sub")
+				}
 				// 扫码成功后立即加载 Cookie 到内存
-				freshCookieOpt(sub)
+				if err := freshCookieOpt(sub); err != nil {
+					logger.Errorf("扫码登录成功，但加载 Cookie 到内存失败: %v", err)
+				}
 			}
 
 			// 如果仍然没有 SUB，模块关闭
@@ -209,7 +216,9 @@ func (c *Concern) Start() error {
 		go func() {
 			for range time.Tick(time.Hour) {
 				currentSub := getRuntimeSUB()
-				freshCookieOpt(currentSub)
+				if err := freshCookieOpt(currentSub); err != nil {
+					logger.Errorf("周期刷新 Cookie 失败: %v", err)
+				}
 			}
 		}()
 	}

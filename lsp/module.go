@@ -948,37 +948,28 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 		if SkipOnlineCheck {
 			logger.Warn("本次启动已跳过 bot 上线等待流程（--online）")
 		} else {
-			const startupTimeout = 5 * time.Minute
-			deadline := time.Now().Add(startupTimeout)
-
-			logger.Info("等待 bot 上线后再启动订阅系统...")
-			for bot.Messenger == nil || !bot.Messenger.Online.Load() {
-				if time.Now().After(deadline) {
-					logger.Errorf("等待 bot 上线超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
-					return
-				}
-				time.Sleep(time.Second)
+			// 首次等待：5 分钟超时
+			if !waitForBotOnline(l, bot, 5*time.Minute) {
+				logger.Errorf("首次等待 bot 上线超时，将在后台继续重试...")
 			}
-			// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
-			// Messenger 为 nil 时继续等待，避免在关闭流程中误触发 StartAll
-			logger.Info("bot 已上线，等待群列表加载完成...")
-			for bot.Messenger == nil || !bot.Messenger.IsListLoaded() {
-				if time.Now().After(deadline) {
-					logger.Errorf("等待群列表加载超时（%v），订阅系统未启动，消息将被丢弃", startupTimeout)
-					return
-				}
-				time.Sleep(time.Second)
-			}
-			logger.Info("群列表加载完成，启动订阅系统")
 		}
 
-		concern.StartAll()
-		l.started.Store(true)
-		logger.Infof("DDBOT启动完成")
-		logger.Infof("D宝，一款真正人性化的单推BOT")
-		if len(l.PermissionStateManager.ListAdmin()) == 0 {
-			logger.Infof("您似乎正在部署全新的BOT，请通过qq对bot私聊发送<%v>(不含括号)获取管理员权限，然后私聊发送<%v>(不含括号)开始使用您的bot",
-				l.CommandShowName(WhosyourdaddyCommand), l.CommandShowName(HelpCommand))
+		// 如果仍需要等待，在后台持续重试（每30秒检查一次）
+		if !SkipOnlineCheck && !l.started.Load() {
+			go func() {
+				retryTicker := time.NewTicker(30 * time.Second)
+				defer retryTicker.Stop()
+				for range retryTicker.C {
+					if l.started.Load() {
+						return
+					}
+					logger.Info("后台重试：等待 bot 上线...")
+					if waitForBotOnline(l, bot, 30*time.Second) {
+						return
+					}
+					logger.Debug("后台重试：bot 仍未上线，继续等待...")
+				}
+			}()
 		}
 	}()
 
@@ -994,6 +985,38 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	}()
 	go l.NewVersionNotify(newVersionChan)
 
+}
+
+// waitForBotOnline 等待 bot 上线并完成群列表加载，超时返回 false
+func waitForBotOnline(l *Lsp, b *bot.Bot, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+
+	logger.Infof("等待 bot 上线（超时 %v）...", timeout)
+	for b.Messenger == nil || !b.Messenger.Online.Load() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+	// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
+	logger.Info("bot 已上线，等待群列表加载完成...")
+	for b.Messenger == nil || !b.Messenger.IsListLoaded() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+	logger.Info("群列表加载完成，启动订阅系统")
+
+	concern.StartAll()
+	l.started.Store(true)
+	logger.Infof("DDBOT启动完成")
+	logger.Infof("D宝，一款真正人性化的单推BOT")
+	if len(l.PermissionStateManager.ListAdmin()) == 0 {
+		logger.Infof("您似乎正在部署全新的BOT，请通过qq对bot私聊发送<%v>(不含括号)获取管理员权限，然后私聊发送<%v>(不含括号)开始使用您的bot",
+			l.CommandShowName(WhosyourdaddyCommand), l.CommandShowName(HelpCommand))
+	}
+	return true
 }
 
 func (l *Lsp) Start(bot *bot.Bot) {

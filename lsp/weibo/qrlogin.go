@@ -209,8 +209,12 @@ func RunQRLoginForQQ(timeout time.Duration) (<-chan QRLoginResult, error) {
 
 		// 1. 运行时加载：更新运行时 SUB 并加载 Cookie 到内存
 		setRuntimeSUB(sub)
-		freshCookieOpt(sub)
-		result.RuntimeLoaded = true
+		if err := freshCookieOpt(sub); err != nil {
+			qrLogger.Warnf("SUB 已获取，但加载 Cookie 到内存失败: %v", err)
+			result.RuntimeLoaded = false
+		} else {
+			result.RuntimeLoaded = true
+		}
 
 		// 2. 配置持久化：写回 application.yaml
 		if err := WriteBackConfig(sub); err != nil {

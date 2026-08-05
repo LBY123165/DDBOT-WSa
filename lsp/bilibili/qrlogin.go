@@ -160,5 +160,8 @@ func GetCookies(Url string) (*BiliCookies, error) {
 			cookies.BILI_JCT = values[0]
 		}
 	}
+	if cookies.SESSDATA == "" || cookies.BILI_JCT == "" {
+		return nil, errors.New("URL 参数中未找到完整的 SESSDATA 或 bili_jct")
+	}
 	return &cookies, nil
 }

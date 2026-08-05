@@ -412,6 +412,13 @@ func ForceFreshCookie() bool {
 			logger.Debugf("从配置中读取到 SUB")
 		}
 	}
+	// 最后尝试从运行时 SUB 读取（扫码登录等场景会更新运行时 SUB）
+	if existingSUB == "" {
+		existingSUB = getRuntimeSUB()
+		if existingSUB != "" {
+			logger.Debugf("从运行时 SUB 读取到 SUB")
+		}
+	}
 
 	cookies, err := FreshCookieLogin()
 	if err != nil {

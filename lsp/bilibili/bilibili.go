@@ -141,6 +141,16 @@ func Init() {
 							logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
 						}
 						SetVerify(cookies.SESSDATA, cookies.BILI_JCT)
+						// 验证 token 完整性：通过 FreshSelfInfo 确认登录成功
+						navResp, err := XWebInterfaceNav(true)
+						if err != nil {
+							logger.Errorf("验证扫码登录结果失败，token 可能无效: %v", err)
+							continue
+						}
+						if navResp.GetCode() != 0 || !navResp.GetData().GetIsLogin() {
+							logger.Errorf("扫码登录验证失败，token 无效: code=%d isLogin=%v", navResp.GetCode(), navResp.GetData().GetIsLogin())
+							continue
+						}
 						FreshSelfInfo()
 						logger.Info("B站扫码登陆成功，请重启DDBOT-WSa")
 						logger.Info("正在退出...")
