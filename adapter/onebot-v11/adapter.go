@@ -14,9 +14,9 @@ import (
 
 var logger = logrus.WithField("adapter", "onebot-v11")
 
-// URI 消息超时时间（NapCat/LLOneBot 需要先下载 URI 文件再上传）
-// 使用与 wsclient 一致的最大值，确保足够长
-const uriMessageTimeout = 30 * time.Minute
+// URI消息超时时间。NapCat/LLOneBot需要先下载远程文件，但不能长期占用默认仅1路的推送并发。
+// 45秒既高于默认API超时，也能保证后续推送在1分钟排队上限内获得执行机会。
+const uriMessageTimeout = 45 * time.Second
 
 type OneBotAdapter struct {
 	config   *adapter.AdapterConfig
@@ -46,6 +46,12 @@ func containsURI(params map[string]interface{}) bool {
 	case string:
 		// CQ码字符串可能包含 URI，但检测复杂，保守处理
 		return false
+	case []adapter.MessageSegment:
+		for _, segment := range m {
+			if segmentContainsURI(segment.Type, segment.Data) {
+				return true
+			}
+		}
 	case []interface{}:
 		for _, seg := range m {
 			segment, ok := seg.(map[string]interface{})
@@ -54,19 +60,21 @@ func containsURI(params map[string]interface{}) bool {
 			}
 			segType, _ := segment["type"].(string)
 			data, _ := segment["data"].(map[string]interface{})
-
-			switch segType {
-			case "image", "video", "record", "file":
-				// 检查 url 或 file 字段是否包含 URI
-				if uri := getSegmentURI(data); uri != "" {
-					if isRemoteURI(uri) {
-						return true
-					}
-				}
+			if segmentContainsURI(segType, data) {
+				return true
 			}
 		}
 	}
 	return false
+}
+
+func segmentContainsURI(segmentType string, data map[string]interface{}) bool {
+	switch segmentType {
+	case "image", "video", "record", "file":
+		return isRemoteURI(getSegmentURI(data))
+	default:
+		return false
+	}
 }
 
 // getSegmentURI 从 segment data 中获取 URI

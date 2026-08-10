@@ -303,9 +303,13 @@ func FreshSelfInfo() {
 		logger.Errorf("获取个人信息失败 - %v，b站功能可能无法使用", err)
 	} else {
 		if navResp.GetCode() != 0 {
+			if isBilibiliLoginInvalidResponse(navResp.GetCode(), navResp.GetMessage()) {
+				notifyBilibiliLoginExpired(bilibiliLoginSourceSelf)
+			}
 			logger.Errorf("获取个人信息失败 - %v %v", navResp.GetCode(), navResp.GetMessage())
 		} else {
 			if navResp.GetData().GetIsLogin() {
+				markBilibiliLoginRecovered(bilibiliLoginSourceSelf)
 				logger.Infof("B站启动成功，当前使用账号：UID:%v %v LV%v %v",
 					navResp.GetData().GetMid(),
 					navResp.GetData().GetVipLabel().GetText(),
@@ -318,6 +322,7 @@ func FreshSelfInfo() {
 				accountUid.Store(navResp.GetData().GetMid())
 				return
 			} else {
+				notifyBilibiliLoginExpired(bilibiliLoginSourceSelf)
 				logger.Errorf("账号未登陆")
 			}
 		}

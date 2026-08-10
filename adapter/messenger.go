@@ -58,18 +58,6 @@ const (
 
 var offlineQueueRetryDelay = 5 * time.Second
 
-// 发送结果分类错误
-// 上游发送层通过 errors.Is 判断错误类型，决定是否安全重试/进入离线队列。
-// 注意：若上游后续在独立文件中定义同名错误，请同步移除此处定义。
-var (
-	// ErrRequestNotSent 请求未发出（写入前失败），可安全重试或进入离线队列
-	ErrRequestNotSent = errors.New("request not sent")
-	// ErrRequestResultUnknown 请求已发出但结果未知（如超时），重试可能造成重复消息
-	ErrRequestResultUnknown = errors.New("request result unknown")
-	// ErrRequestRejected 请求被服务端明确拒绝（如风控），不应重试
-	ErrRequestRejected = errors.New("request rejected")
-)
-
 type SendResp struct {
 	RetMSG *GroupMessage
 	Error  error
@@ -1677,6 +1665,16 @@ func (m *Messenger) GetFileUrl(groupCode int64, fileId string) string {
 
 // offlineQueue 相关方法
 
+func newOfflineQueueMsg(targetID int64, targetType string, msg *SendingMessage, newStr string) offlineQueueMsg {
+	return offlineQueueMsg{
+		TargetId:   targetID,
+		TargetType: targetType,
+		Message:    msg,
+		NewStr:     newStr,
+		CreatedAt:  time.Now(),
+	}
+}
+
 func getOfflineQueueEnable() bool {
 	return config.GlobalConfig.GetBool("bot.offlineQueue.enable")
 }
@@ -1692,16 +1690,6 @@ func getOfflineQueueExpire() time.Duration {
 		return 30 * time.Minute
 	}
 	return t
-}
-
-func newOfflineQueueMsg(targetID int64, targetType string, msg *SendingMessage, newStr string) offlineQueueMsg {
-	return offlineQueueMsg{
-		TargetId:   targetID,
-		TargetType: targetType,
-		Message:    msg,
-		NewStr:     newStr,
-		CreatedAt:  time.Now(),
-	}
 }
 
 func (m *Messenger) saveOfflineMsg(msg offlineQueueMsg) {
