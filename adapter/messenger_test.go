@@ -70,11 +70,12 @@ func (m *mockAdapter) SendPrivateMessage(userID int64, message interface{}) (int
 
 type retryMockAdapter struct {
 	*mockAdapter
-	mu             sync.Mutex
-	groupErrors    []error
-	groupSendCount int
-	privateErrors  []error
-	connected      bool
+	mu               sync.Mutex
+	groupErrors      []error
+	groupSendCount   int
+	privateErrors    []error
+	privateSendCount int
+	connected        bool
 }
 
 func newRetryMockAdapter(groupErrors ...error) *retryMockAdapter {
@@ -114,6 +115,7 @@ func (m *retryMockAdapter) SendGroupMessage(groupID int64, message interface{}) 
 func (m *retryMockAdapter) SendPrivateMessage(userID int64, message interface{}) (int32, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.privateSendCount++
 	if len(m.privateErrors) > 0 {
 		err := m.privateErrors[0]
 		m.privateErrors = m.privateErrors[1:]
@@ -128,6 +130,12 @@ func (m *retryMockAdapter) sendCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.groupSendCount
+}
+
+func (m *retryMockAdapter) privateCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.privateSendCount
 }
 func (m *mockAdapter) SendGroupForwardMessage(groupID int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
 	return 1, "", nil
@@ -1033,6 +1041,132 @@ func TestOfflineQueue_RetriesFailedGroupMessage(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return mock.sendCount() == 2 && len(messenger.loadOfflineMsgs()) == 0
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestSendGroupMessage_QueuedWhenNotSentAndQueueEnabled(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: not connected", ErrRequestNotSent))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "queued group alert"})
+	resp := messenger.SendGroupMessage(545402644, msg, "queued group alert")
+
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+func TestSendResp_Status(t *testing.T) {
+	tests := []struct {
+		name string
+		resp SendResp
+		want GroupSendStatus
+	}{
+		{name: "sent", resp: SendResp{RetMSG: &GroupMessage{ID: 42}}, want: GroupSendSent},
+		{name: "queued", resp: SendResp{RetMSG: &GroupMessage{ID: -1}, Queued: true}, want: GroupSendQueued},
+		{name: "queued with write failure", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+			Queued: true,
+		}, want: GroupSendQueued},
+		{name: "not sent", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+		}, want: GroupSendNotSent},
+		{name: "unknown", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: timeout", ErrRequestResultUnknown),
+		}, want: GroupSendUnknown},
+		{name: "unclassified is unknown", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  errors.New("satori request failed"),
+		}, want: GroupSendUnknown},
+		{name: "rejected", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: bot muted", ErrRequestRejected),
+		}, want: GroupSendRejected},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.resp.Status())
+		})
+	}
+}
+
+func TestSendGroupMessage_StopsAfterFirstFailedChunk(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(firstErr, nil)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength+100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendGroupMessage(545402644, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, GroupSendNotSent, resp.Status())
+	assert.Equal(t, 1, mock.sendCount(), "a failed chunk must stop the remaining chunks")
+}
+
+func TestSendGroupMessage_QueuesFailedAndRemainingChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(firstErr, nil)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength) + strings.Repeat("b", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendGroupMessage(545402644, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.Equal(t, 1, mock.sendCount(), "queued chunks must not continue through the adapter")
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2, "the failed chunk and every remaining chunk must be queued")
+	assert.Equal(t, content, queuedMessageText(queued))
+}
+
+func TestSendGroupMessage_DoesNotRequeueSuccessfulChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	writeErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(nil, writeErr)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	first := strings.Repeat("a", MaxTextLength)
+	unsent := strings.Repeat("b", MaxTextLength) + strings.Repeat("c", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: first + unsent})
+	resp := messenger.SendGroupMessage(545402644, msg, first+unsent)
+
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.Equal(t, 2, mock.sendCount())
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2)
+	assert.Equal(t, unsent, queuedMessageText(queued), "successful chunks must not be queued again")
 }
 
 func TestOfflineQueue_DoesNotRetryTimedOutGroupMessage(t *testing.T) {
@@ -2082,6 +2216,90 @@ func TestSendPrivateMessage_QueuedWhenNotSentAndQueueEnabled(t *testing.T) {
 	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
 	assert.Equal(t, PrivateSendQueued, resp.Status())
 	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+func TestSendPrivateMessage_StopsAfterFirstFailedChunk(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{firstErr, nil}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength+100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendPrivateMessage(123456, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendNotSent, resp.Status())
+	assert.Equal(t, 1, mock.privateCount(), "a failed chunk must stop the remaining chunks")
+}
+
+func TestSendPrivateMessage_QueuesFailedAndRemainingChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{firstErr, nil}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength) + strings.Repeat("b", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendPrivateMessage(123456, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Equal(t, 1, mock.privateCount(), "queued chunks must not continue through the adapter")
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2, "the failed chunk and every remaining chunk must be queued")
+	assert.Equal(t, content, queuedMessageText(queued))
+}
+
+func TestSendPrivateMessage_DoesNotRequeueSuccessfulChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	writeErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{nil, writeErr}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	first := strings.Repeat("a", MaxTextLength)
+	unsent := strings.Repeat("b", MaxTextLength) + strings.Repeat("c", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: first + unsent})
+	resp := messenger.SendPrivateMessage(123456, msg, first+unsent)
+
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Equal(t, 2, mock.privateCount())
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2)
+	assert.Equal(t, unsent, queuedMessageText(queued), "successful chunks must not be queued again")
+}
+
+func queuedMessageText(messages []offlineQueueMsg) string {
+	var result strings.Builder
+	for _, message := range messages {
+		for _, element := range message.Message.Elements {
+			if text, ok := element.(*TextSegment); ok {
+				result.WriteString(text.Content)
+			}
+		}
+	}
+	return result.String()
 }
 
 // TestMessengerRefreshList_RetrySucceeds 验证列表加载失败后后台重试成功，

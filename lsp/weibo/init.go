@@ -383,17 +383,15 @@ func sendGroupAlert(groupCode int64, isRecovery bool) bool {
 	resp := bot.Instance.SendGroupMessage(groupCode, sm, summary)
 
 	// 仅在发送成功或确认进入离线队列后设置告警去重标记
-	delivered := false
-	if !isRecovery && resp.Error == nil {
+	delivered := resp.Status() == adapter.GroupSendSent || resp.Status() == adapter.GroupSendQueued
+	if !isRecovery && delivered {
 		_ = c.StateManager.Set(alertKey, "",
 			localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
-		delivered = true
-	} else if isRecovery {
-		delivered = true
 	}
-	if resp.Error != nil {
+	if !delivered {
 		logger.WithField("GroupCode", groupCode).
 			WithField("IsRecovery", isRecovery).
+			WithField("Status", resp.Status()).
 			Errorf("发送微博 Cookie 告警通知到群失败: %v", resp.Error)
 	} else {
 		logger.WithField("GroupCode", groupCode).
@@ -588,8 +586,9 @@ func sendSUBExpiredGroupAlert(groupCode int64) bool {
 	summary := msgstringer.AdapterMsgToString(sm.Elements)
 	resp := bot.Instance.SendGroupMessage(groupCode, sm, summary)
 
-	if resp.Error != nil {
+	if resp.Status() != adapter.GroupSendSent && resp.Status() != adapter.GroupSendQueued {
 		logger.WithField("GroupCode", groupCode).
+			WithField("Status", resp.Status()).
 			Errorf("发送微博 SUB 过期告警通知到群失败: %v", resp.Error)
 		// 发送失败，清除去重标记以便下次重试
 		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(groupCode))
