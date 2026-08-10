@@ -947,6 +947,10 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	go func() {
 		if SkipOnlineCheck {
 			logger.Warn("本次启动已跳过 bot 上线等待流程（--online）")
+			// --online 模式仍需启动订阅系统，否则微博/B站等订阅任务不会运行
+			concern.StartAll()
+			l.started.Store(true)
+			logger.Infof("DDBOT启动完成（--online 调试模式）")
 		} else {
 			// 首次等待：5 分钟超时
 			if !waitForBotOnline(l, bot, 5*time.Minute) {
@@ -992,7 +996,8 @@ func waitForBotOnline(l *Lsp, b *bot.Bot, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 
 	logger.Infof("等待 bot 上线（超时 %v）...", timeout)
-	for b.Messenger == nil || !b.Messenger.Online.Load() {
+	// 基于实际 WS 连接状态等待，避免心跳缓存 Online 滞后导致误判
+	for b.Messenger == nil || !b.Messenger.IsConnected() {
 		if time.Now().After(deadline) {
 			return false
 		}
@@ -1219,7 +1224,9 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with nil private message")
 		return &adapter.PrivateMessage{ID: -1}
 	}
-	if bot.Instance == nil || bot.Instance.Messenger == nil || !bot.Instance.Messenger.Online.Load() {
+	// 不在此处依据连接状态短路：由 Messenger.SendPrivateMessage 统一处理
+	// 在线直接发送、离线且开启离线队列时入队，避免依赖可能滞后的 Online 心跳缓存误判
+	if bot.Instance == nil || bot.Instance.Messenger == nil {
 		return &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
 	}
 	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {

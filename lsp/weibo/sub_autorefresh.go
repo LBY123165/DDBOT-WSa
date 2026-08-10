@@ -128,6 +128,9 @@ func refreshSubFromAPI() error {
 	}
 	visitorCookiesOpt.Store(opt)
 
+	// 同步更新运行时 SUB，否则后续每小时定时刷新仍会使用旧 SUB，导致自动刷新失效
+	setRuntimeSUB(newSub)
+
 	logger.Infof("SUB 已成功更新到内存，共加载 %d 个 cookie", len(opt))
 	return nil
 }

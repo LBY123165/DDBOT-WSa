@@ -132,16 +132,9 @@ func Init() {
 								continue
 							}
 						}
-						config.GlobalConfig.Set("bilibili.SESSDATA", cookies.SESSDATA)
-						config.GlobalConfig.Set("bilibili.bili_jct", cookies.BILI_JCT)
-						if err := cfg.WriteConfigKeyValue("bilibili.SESSDATA", cookies.SESSDATA); err != nil {
-							logger.Errorf("保存 SESSDATA 到配置文件失败 - %v", err)
-						}
-						if err := cfg.WriteConfigKeyValue("bilibili.bili_jct", cookies.BILI_JCT); err != nil {
-							logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
-						}
+						// 先用临时凭据验证登录状态，确认 isLogin=true 后再提交内存与配置文件，
+						// 避免二维码返回无效 Cookie 时覆盖原有有效配置
 						SetVerify(cookies.SESSDATA, cookies.BILI_JCT)
-						// 验证 token 完整性：通过 FreshSelfInfo 确认登录成功
 						navResp, err := XWebInterfaceNav(true)
 						if err != nil {
 							logger.Errorf("验证扫码登录结果失败，token 可能无效: %v", err)
@@ -150,6 +143,14 @@ func Init() {
 						if navResp.GetCode() != 0 || !navResp.GetData().GetIsLogin() {
 							logger.Errorf("扫码登录验证失败，token 无效: code=%d isLogin=%v", navResp.GetCode(), navResp.GetData().GetIsLogin())
 							continue
+						}
+						config.GlobalConfig.Set("bilibili.SESSDATA", cookies.SESSDATA)
+						config.GlobalConfig.Set("bilibili.bili_jct", cookies.BILI_JCT)
+						if err := cfg.WriteConfigKeyValue("bilibili.SESSDATA", cookies.SESSDATA); err != nil {
+							logger.Errorf("保存 SESSDATA 到配置文件失败 - %v", err)
+						}
+						if err := cfg.WriteConfigKeyValue("bilibili.bili_jct", cookies.BILI_JCT); err != nil {
+							logger.Errorf("保存 bili_jct 到配置文件失败 - %v", err)
 						}
 						FreshSelfInfo()
 						logger.Info("B站扫码登陆成功，请重启DDBOT-WSa")

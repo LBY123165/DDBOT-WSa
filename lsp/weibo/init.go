@@ -81,14 +81,15 @@ func init() {
 					sendCookieAlertToAllGroups(true)
 				}
 				lastAlertSent = false
-			} else if !lastAlertSent {
+			} else {
 				// 网络错误时 SUB 状态未知，不发送告警，等待下一轮再检查
 				if subNetErr {
 					logger.Debug("Cookie/SUB 检测遇到网络错误，跳过本次告警")
 					continue
 				}
-				// 刷新失败或 SUB 明确失效且尚未发过告警，发送告警通知
-				// 仅当至少一个目标成功发送后才设置 lastAlertSent，避免全部失败后停止重试
+				// 刷新失败或 SUB 明确失效：始终尝试发送告警。
+				// 已成功的目标由各自的 2 小时去重 key 控制，失败的管理员/群会持续重试，
+				// 避免仅有一个目标发送成功就把全局状态置为已发送而停止其余目标的重试。
 				if cfg.GetWeiboCookieAlertEnabled() && sendCookieAlertToAllGroups(false) {
 					lastAlertSent = true
 				}
@@ -208,7 +209,13 @@ func isSUBValidDetailed() (bool, bool) {
 	testUid := int64(5462373877)
 	profileResp, err := ApiContainerGetIndexProfile(testUid)
 	if err != nil {
-		// 网络错误（DNS、超时、连接拒绝等），SUB 状态未知
+		// 区分明确的鉴权失效与网络层错误：
+		// - 鉴权失效（Cookie/SUB 无效返回 HTML、HTTP 4xx、响应解析失败）应触发告警
+		// - 仅网络层错误（DNS、超时、连接拒绝等）时 SUB 状态未知，跳过本次告警
+		if isAuthFailure(err) {
+			logger.Debugf("SUB 有效性检测失败 - Cookie/SUB 鉴权失效: %v", err)
+			return false, false
+		}
 		logger.Debugf("SUB 有效性检测遇到网络错误: %v", err)
 		return false, true
 	}
@@ -322,11 +329,12 @@ func sendPrivateAlert(qq int64, isRecovery bool) bool {
 	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
 
 	// 仅在发送成功或确认进入离线队列后设置告警去重标记
-	// WS 在线时 ID==-1 表示发送失败，不设置去重以便重试
+	// WS 连接就绪时 ID==-1 表示发送失败，不设置去重以便重试
 	// WS 离线时 ID==-1 表示已进入离线队列，视为成功
+	// 使用实际连接状态而非心跳缓存 Online，避免滞后导致误判
 	delivered := false
 	if !isRecovery {
-		if bot.Instance.Messenger.Online.Load() && resp.ID == -1 {
+		if bot.Instance.Messenger.IsConnected() && resp.ID == -1 {
 			logger.WithField("QQ", qq).Warn("私聊告警发送失败，不设置去重标记以便重试")
 		} else {
 			_ = c.StateManager.Set(alertKey, "",
@@ -542,7 +550,7 @@ func sendSUBExpiredAlert(qq int64) bool {
 
 	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
 
-	if bot.Instance.Messenger.Online.Load() && resp.ID == -1 {
+	if bot.Instance.Messenger.IsConnected() && resp.ID == -1 {
 		logger.WithField("QQ", qq).Warn("SUB 过期告警发送失败，清除去重标记以便重试")
 		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq))
 		return false

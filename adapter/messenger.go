@@ -93,9 +93,18 @@ type Messenger struct {
 	offlineQueue   []offlineQueueMsg
 	offlineQueueMu sync.Mutex
 
+	// listReloadRetryActive 标记列表重载重试协程是否已启动，防止重复启动
+	listReloadRetryActive atomic.Bool
+
 	// listLoaded 标记好友/群/群成员列表是否已完成首次加载
 	listLoaded atomic.Bool
 }
+
+// 列表加载重试参数
+var (
+	listReloadRetryInterval = 15 * time.Second
+	listReloadMaxRetries    = 10
+)
 
 func NewMessenger(adapter Adapter) *Messenger {
 	m := &Messenger{
@@ -148,9 +157,14 @@ func (m *Messenger) registerEventHandlers() {
 
 	m.Adapter.OnMetaEvent(func(event *MetaEvent) {
 		if event.MetaEventType == "lifecycle" {
+			wasOnline := m.Online.Load()
 			m.Uin = event.SelfID
 			m.Online.Store(true)
 			messengerLogger.Infof("Bot online: %d", m.Uin)
+			// 重连（lifecycle 事件）时同样刷新离线队列，避免心跳未翻转导致缓存消息滞留
+			if !wasOnline && getOfflineQueueEnable() {
+				go m.flushOfflineQueue()
+			}
 			// Lifecycle事件触发时立即刷新好友、群组、群员信息
 			go func() {
 				if err := m.RefreshList(); err != nil {
@@ -201,8 +215,8 @@ func (m *Messenger) GetSelfID() int64 {
 }
 
 func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newstr string) SendResp {
-	// 检查离线队列条件
-	if getOfflineQueueEnable() && !m.Online.Load() {
+	// 检查离线队列条件（基于实际连接状态，避免心跳缓存滞后导致误判）
+	if getOfflineQueueEnable() && !m.isConnectionReady() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存消息: %s", sliceMessage(newstr))
 		m.saveOfflineMsg(offlineQueueMsg{
 			TargetId:   groupCode,
@@ -266,8 +280,8 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 }
 
 func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
-	// 检查离线队列条件
-	if getOfflineQueueEnable() && !m.Online.Load() {
+	// 检查离线队列条件（基于实际连接状态，避免心跳缓存滞后导致误判）
+	if getOfflineQueueEnable() && !m.isConnectionReady() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
 		m.saveOfflineMsg(offlineQueueMsg{
 			TargetId:   target,
@@ -1041,33 +1055,82 @@ func (m *Messenger) GetGroupInfo(groupCode int64) (*GroupInfo, error) {
 }
 
 func (m *Messenger) RefreshList() error {
+	err := m.reloadLists()
+	if err != nil {
+		messengerLogger.WithError(err).Error("列表加载不完整，不标记加载完成，将在后台重试")
+		m.startListReloadRetry()
+		return err
+	}
+	m.listLoaded.Store(true)
+	return nil
+}
+
+// reloadLists 加载好友、群组和群成员列表。
+// 任一列表加载失败都返回错误，避免残缺列表被当作加载成功并启动订阅。
+func (m *Messenger) reloadLists() error {
+	var listErr error
+
 	if err := m.ReloadFriendList(); err != nil {
 		messengerLogger.WithError(err).Error("unable to load friends list")
+		listErr = err
+	} else {
+		messengerLogger.Infof("已加载 %d 个好友", len(m.FriendList))
 	}
-	messengerLogger.Infof("已加载 %d 个好友", len(m.FriendList))
 
 	if err := m.ReloadGroupList(); err != nil {
 		messengerLogger.WithError(err).Error("unable to load groups list")
+		if listErr == nil {
+			listErr = err
+		}
+	} else {
+		messengerLogger.Infof("已加载 %d 个群组", len(m.GroupList))
 	}
-	messengerLogger.Infof("已加载 %d 个群组", len(m.GroupList))
+
+	// 好友/群列表失败时不再加载成员，避免在残缺列表上继续请求
+	if listErr != nil {
+		return listErr
+	}
 
 	var totalMembers int
 	for _, group := range m.GroupList {
 		members, err := m.GetGroupMembersByID(group.Code)
 		if err != nil {
 			messengerLogger.WithError(err).Errorf("unable to load group members for %d", group.Code)
+			if listErr == nil {
+				listErr = err
+			}
 			continue
 		}
 		totalMembers += len(group.Members)
 		messengerLogger.Debugf("群[%d]加载成员[%d]个", group.Code, len(members))
 	}
-
 	messengerLogger.Infof("已加载 %d 个群成员", totalMembers)
 
-	// 标记列表加载完成，供等待启动的模块使用
-	m.listLoaded.Store(true)
+	return listErr
+}
 
-	return nil
+// startListReloadRetry 启动列表重载重试协程，避免加载失败后订阅系统永久无法启动
+func (m *Messenger) startListReloadRetry() {
+	if !m.listReloadRetryActive.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer m.listReloadRetryActive.Store(false)
+		for i := 1; i <= listReloadMaxRetries; i++ {
+			time.Sleep(listReloadRetryInterval)
+			if m.listLoaded.Load() {
+				return
+			}
+			if err := m.reloadLists(); err != nil {
+				messengerLogger.WithError(err).Warnf("列表重载重试 %d/%d 失败，保持未加载状态", i, listReloadMaxRetries)
+				continue
+			}
+			m.listLoaded.Store(true)
+			messengerLogger.Info("列表重载重试成功，已标记加载完成")
+			return
+		}
+		messengerLogger.Error("列表多次重试仍失败，订阅系统将不会启动，请检查适配器连接后重启")
+	}()
 }
 
 // IsListLoaded 返回好友/群/群成员列表是否已完成首次加载
@@ -1075,9 +1138,19 @@ func (m *Messenger) IsListLoaded() bool {
 	return m.listLoaded.Load()
 }
 
-// IsConnected 返回当前 WS 连接是否在线（基于心跳状态）
-func (m *Messenger) IsConnected() bool {
+// isConnectionReady 返回当前是否具备实际投递能力
+// 优先使用 Adapter 的实际 WS 连接状态，避免心跳缓存 Online 滞后导致误判
+func (m *Messenger) isConnectionReady() bool {
+	if m.Adapter != nil {
+		return m.Adapter.IsConnected()
+	}
 	return m.Online.Load()
+}
+
+// IsConnected 返回当前 WS 连接是否在线
+// 优先使用 Adapter 的实际连接状态，避免心跳缓存 Online 滞后导致误判
+func (m *Messenger) IsConnected() bool {
+	return m.isConnectionReady()
 }
 
 func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {

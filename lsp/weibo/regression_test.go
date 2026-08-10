@@ -1,6 +1,8 @@
 package weibo
 
 import (
+	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -190,4 +192,41 @@ func TestEventBusBotOnlineMultipleSubscribers(t *testing.T) {
 	default:
 		t.Fatal("订阅者2应收到事件")
 	}
+}
+
+// TestIsAuthFailure_Classification 验证错误分类：
+// 鉴权失效（Cookie/SUB 失效、HTTP 4xx、响应解析失败）不应被当成网络错误，
+// 否则 Cookie/SUB 真正失效时告警会被一直跳过。
+func TestIsAuthFailure_Classification(t *testing.T) {
+	// 明确的鉴权失效：API 返回 HTML 登录页
+	assert.True(t, isAuthFailure(errors.New("invalid character '<' looking for beginning of value")))
+	assert.True(t, isAuthFailure(errors.New("unexpected end of JSON input")))
+
+	// 响应解析失败
+	assert.True(t, isAuthFailure(errors.New("cannot unmarshal number into Go value of type string")))
+
+	// HTTP 4xx：请求已到达服务器但被拒绝
+	assert.True(t, isAuthFailure(errors.New("http code error 403")))
+	assert.True(t, isAuthFailure(errors.New("http code error 414")))
+
+	// 网络层错误：DNS、超时、连接拒绝，以及 HTTP 5xx 服务端错误
+	assert.False(t, isAuthFailure(errors.New("dial tcp 127.0.0.1:80: connect: connection refused")))
+	assert.False(t, isAuthFailure(errors.New("http code error 502")))
+	assert.False(t, isAuthFailure(nil))
+}
+
+// TestSanitizeLoginURL_MasksSensitiveParams 验证登录跳转 URL 日志脱敏，
+// 避免完整 ALT/ticket 凭据写入日志。
+func TestSanitizeLoginURL_MasksSensitiveParams(t *testing.T) {
+	u, err := url.Parse("https://passport.weibo.com/sso/v2/login?alt=ALT-very-secret-token&entry=miniblog&ticket=ticket-abc-123")
+	assert.NoError(t, err)
+
+	sanitized := sanitizeLoginURL(u)
+	assert.NotContains(t, sanitized, "ALT-very-secret-token", "不应泄露完整 ALT")
+	assert.NotContains(t, sanitized, "ticket-abc-123", "不应泄露完整 ticket")
+	// url.Values.Encode() 会将 *** 编码为 %2A%2A%2A
+	assert.Contains(t, sanitized, "%2A%2A%2A", "敏感参数值应被脱敏")
+	assert.Contains(t, sanitized, "entry=miniblog", "非敏感参数应保留")
+
+	assert.Equal(t, "", sanitizeLoginURL(nil))
 }

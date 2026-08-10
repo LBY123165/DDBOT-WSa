@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"github.com/stretchr/testify/assert"
 	"strings"
@@ -14,12 +15,19 @@ type mockAdapter struct {
 	groupList       []*GroupInfo
 	groupMemberList map[int64][]*GroupMemberInfo
 	strangerInfo    map[int64]map[string]interface{}
+
+	connected bool
+	// 错误注入
+	friendListErr  error
+	groupListErr   error
+	groupMemberErr error
 }
 
 func newMockAdapter() *mockAdapter {
 	return &mockAdapter{
 		groupMemberList: make(map[int64][]*GroupMemberInfo),
 		strangerInfo:    make(map[int64]map[string]interface{}),
+		connected:       true,
 	}
 }
 
@@ -27,7 +35,7 @@ func (m *mockAdapter) Start() error                                     { return
 func (m *mockAdapter) Stop() error                                      { return nil }
 func (m *mockAdapter) GetSelfID() int64                                 { return 1143469507 }
 func (m *mockAdapter) GetAdapterName() string                           { return "mock" }
-func (m *mockAdapter) IsConnected() bool                                { return true }
+func (m *mockAdapter) IsConnected() bool                                { return m.connected }
 func (m *mockAdapter) GetFileUrl(groupCode int64, fileId string) string { return "" }
 func (m *mockAdapter) DownloadFile(url, base64, name string, headers []string) (string, error) {
 	return "", nil
@@ -64,11 +72,24 @@ func (m *mockAdapter) SendGroupForwardMessage(groupID int64, nodes []map[string]
 func (m *mockAdapter) SendPrivateForwardMessage(userID int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
 	return 1, "", nil
 }
-func (m *mockAdapter) GetGroupList() ([]*GroupInfo, error) { return m.groupList, nil }
+func (m *mockAdapter) GetGroupList() ([]*GroupInfo, error) {
+	if m.groupListErr != nil {
+		return nil, m.groupListErr
+	}
+	return m.groupList, nil
+}
 func (m *mockAdapter) GetGroupMemberList(groupID int64) ([]*GroupMemberInfo, error) {
+	if m.groupMemberErr != nil {
+		return nil, m.groupMemberErr
+	}
 	return m.groupMemberList[groupID], nil
 }
-func (m *mockAdapter) GetFriendList() ([]*FriendInfo, error) { return nil, nil }
+func (m *mockAdapter) GetFriendList() ([]*FriendInfo, error) {
+	if m.friendListErr != nil {
+		return nil, m.friendListErr
+	}
+	return nil, nil
+}
 func (m *mockAdapter) GetStrangerInfo(userID int64) (map[string]interface{}, error) {
 	return m.strangerInfo[userID], nil
 }
@@ -1579,4 +1600,83 @@ func TestIsSingleElement(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestMessengerIsConnected_UsesAdapterState 验证 IsConnected 优先使用
+// Adapter 的实际连接状态，而不是可能滞后的心跳缓存 Online。
+// 回归场景：心跳缓存滞后导致发送/重连逻辑误判。
+func TestMessengerIsConnected_UsesAdapterState(t *testing.T) {
+	adapter := newMockAdapter()
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+
+	// 即使心跳缓存标记为离线，只要实际连接存在，应视为已连接
+	messenger.Online.Store(false)
+	assert.True(t, messenger.IsConnected(), "Adapter 已连接时应返回 true")
+
+	// 实际连接断开时返回 false
+	adapter.connected = false
+	messenger.Online.Store(true)
+	assert.False(t, messenger.IsConnected(), "Adapter 未连接时应返回 false")
+}
+
+// TestMessengerRefreshList_FailureKeepsUnloaded 验证列表加载失败时不标记
+// listLoaded，避免残缺列表被当成加载成功并启动订阅。
+func TestMessengerRefreshList_FailureKeepsUnloaded(t *testing.T) {
+	adapter := newMockAdapter()
+	adapter.friendListErr = errors.New("friend list unavailable")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	err := messenger.RefreshList()
+	assert.Error(t, err, "好友列表加载失败应返回错误")
+	assert.False(t, messenger.IsListLoaded(), "加载失败后不应标记加载完成")
+}
+
+// TestMessengerRefreshList_MemberFailureKeepsUnloaded 验证群成员加载失败
+// 同样不标记 listLoaded，且后台重试成功后恢复。
+func TestMessengerRefreshList_MemberFailureKeepsUnloaded(t *testing.T) {
+	oldInterval := listReloadRetryInterval
+	listReloadRetryInterval = 10 * time.Millisecond
+	defer func() { listReloadRetryInterval = oldInterval }()
+
+	adapter := newMockAdapter()
+	adapter.groupList = []*GroupInfo{{Uin: 111, Code: 111, Name: "G1"}}
+	adapter.groupMemberErr = errors.New("member api unavailable")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	err := messenger.RefreshList()
+	assert.Error(t, err, "群成员加载失败应返回错误")
+	assert.False(t, messenger.IsListLoaded(), "成员加载失败后不应标记加载完成")
+
+	// 修复成员接口后，后台重试应自动标记加载完成
+	adapter.groupMemberErr = nil
+	assert.Eventually(t, func() bool {
+		return messenger.IsListLoaded()
+	}, 2*time.Second, 20*time.Millisecond, "后台重试应最终标记加载完成")
+}
+
+// TestMessengerRefreshList_RetrySucceeds 验证列表加载失败后后台重试成功，
+// 避免订阅系统因一次性失败而永久无法启动。
+func TestMessengerRefreshList_RetrySucceeds(t *testing.T) {
+	oldInterval := listReloadRetryInterval
+	listReloadRetryInterval = 10 * time.Millisecond
+	defer func() { listReloadRetryInterval = oldInterval }()
+
+	adapter := newMockAdapter()
+	adapter.friendListErr = errors.New("temporary failure")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	assert.Error(t, messenger.RefreshList())
+	assert.False(t, messenger.IsListLoaded())
+
+	// 修复适配器后，后台重试应成功
+	time.Sleep(50 * time.Millisecond)
+	adapter.friendListErr = nil
+
+	assert.Eventually(t, func() bool {
+		return messenger.IsListLoaded()
+	}, 2*time.Second, 20*time.Millisecond, "后台重试应最终标记加载完成")
 }

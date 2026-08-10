@@ -341,8 +341,8 @@ func Init() {
 	// 监控 WS 重连，重连后重新发布 bot_online 事件
 	reconnectStop = make(chan struct{})
 	go func() {
-		// 等待首次上线
-		for !messenger.Online.Load() {
+		// 等待首次上线（基于实际连接状态，避免心跳缓存 Online 滞后导致误判）
+		for !messenger.IsConnected() {
 			select {
 			case <-reconnectStop:
 				return
@@ -357,7 +357,7 @@ func Init() {
 			case <-reconnectStop:
 				return
 			case <-ticker.C:
-				nowOnline := messenger.Online.Load()
+				nowOnline := messenger.IsConnected()
 				if nowOnline && !wasOnline {
 					logger.Info("Bot reconnected, publishing bot_online event")
 					eventbus.BusObj.Publish("bot_online", true)

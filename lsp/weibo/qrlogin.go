@@ -390,7 +390,8 @@ func finalizeLogin(client *http.Client, raw *qrCheckResp, outputDir string) (str
 	if alt == "" {
 		return "", fmt.Errorf("未能从响应中提取ALT/ticket")
 	}
-	qrLogger.Infof("提取到票据 ALT: %s", alt)
+	// 脱敏记录，避免完整 ALT/ticket 泄露登录凭据
+	qrLogger.Infof("提取到票据 ALT: %s", maskSub(alt))
 
 	params := url.Values{}
 	params.Set("entry", "miniblog")
@@ -411,7 +412,8 @@ func finalizeLogin(client *http.Client, raw *qrCheckResp, outputDir string) (str
 		return "", err
 	}
 	resp.Body.Close()
-	qrLogger.Infof("登录完成，跳转: %s", resp.Request.URL.String())
+	// 跳转 URL 可能携带 alt/ticket 参数，脱敏后记录
+	qrLogger.Infof("登录完成，跳转: %s", sanitizeLoginURL(resp.Request.URL))
 
 	sub := pickSUB(client, resp.Request.URL)
 	if sub == "" {
@@ -436,6 +438,22 @@ func extractALT(raw *qrCheckResp) string {
 		return m[1]
 	}
 	return ""
+}
+
+// sanitizeLoginURL 脱敏登录跳转 URL，隐藏 alt/ticket 等敏感参数，避免日志泄露登录凭据
+func sanitizeLoginURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	clone := *u
+	q := clone.Query()
+	for _, key := range []string{"alt", "ticket"} {
+		if q.Get(key) != "" {
+			q.Set(key, "***")
+		}
+	}
+	clone.RawQuery = q.Encode()
+	return clone.String()
 }
 
 func pickSUB(client *http.Client, u *url.URL) string {
