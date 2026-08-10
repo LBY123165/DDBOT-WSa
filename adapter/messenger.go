@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
 	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/cnxysoft/DDBOT-WSa/utils/qqlog"
@@ -50,6 +51,23 @@ const (
 	// 消息分片限制
 	MaxTextLength = 4500 // 文本最大长度
 	MaxImageCount = 20   // 图片最大数量
+
+	// 离线消息队列上限
+	offlineQueueMaxSize = 100
+)
+
+var offlineQueueRetryDelay = 5 * time.Second
+
+// 发送结果分类错误
+// 上游发送层通过 errors.Is 判断错误类型，决定是否安全重试/进入离线队列。
+// 注意：若上游后续在独立文件中定义同名错误，请同步移除此处定义。
+var (
+	// ErrRequestNotSent 请求未发出（写入前失败），可安全重试或进入离线队列
+	ErrRequestNotSent = errors.New("request not sent")
+	// ErrRequestResultUnknown 请求已发出但结果未知（如超时），重试可能造成重复消息
+	ErrRequestResultUnknown = errors.New("request result unknown")
+	// ErrRequestRejected 请求被服务端明确拒绝（如风控），不应重试
+	ErrRequestRejected = errors.New("request rejected")
 )
 
 type SendResp struct {
@@ -90,8 +108,10 @@ type Messenger struct {
 	privateSendCount atomic.Int64
 
 	// 离线消息队列
-	offlineQueue   []offlineQueueMsg
-	offlineQueueMu sync.Mutex
+	offlineQueue          []offlineQueueMsg
+	offlineQueueMu        sync.Mutex
+	offlineQueueFlushMu   sync.Mutex
+	offlineFlushScheduled atomic.Bool
 
 	// listReloadRetryActive 标记列表重载重试协程是否已启动，防止重复启动
 	listReloadRetryActive atomic.Bool
@@ -157,9 +177,8 @@ func (m *Messenger) registerEventHandlers() {
 
 	m.Adapter.OnMetaEvent(func(event *MetaEvent) {
 		if event.MetaEventType == "lifecycle" {
-			wasOnline := m.Online.Load()
 			m.Uin = event.SelfID
-			m.Online.Store(true)
+			wasOnline := m.Online.Swap(true)
 			messengerLogger.Infof("Bot online: %d", m.Uin)
 			// 重连（lifecycle 事件）时同样刷新离线队列，避免心跳未翻转导致缓存消息滞留
 			if !wasOnline && getOfflineQueueEnable() {
@@ -215,16 +234,11 @@ func (m *Messenger) GetSelfID() int64 {
 }
 
 func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newstr string) SendResp {
-	// 检查离线队列条件（基于实际连接状态，避免心跳缓存滞后导致误判）
-	if getOfflineQueueEnable() && !m.isConnectionReady() {
+	// 检查离线队列条件（账号在线且 WS 已连接）
+	if getOfflineQueueEnable() && !m.isConnected() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存消息: %s", sliceMessage(newstr))
-		m.saveOfflineMsg(offlineQueueMsg{
-			TargetId:   groupCode,
-			TargetType: "group",
-			Message:    msg,
-			NewStr:     newstr,
-			CreatedAt:  time.Now(),
-		})
+		m.saveOfflineMsg(newOfflineQueueMsg(groupCode, "group", msg, newstr))
+		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
 		return SendResp{RetMSG: &GroupMessage{ID: -1}, Error: nil}
 	}
 
@@ -256,6 +270,16 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 		m.groupSendCount.Add(1)
 		if err != nil {
 			messengerLogger.Errorf("Send group message failed (chunk %d/%d): %v", i+1, len(chunks), err)
+			if errors.Is(err, ErrRequestResultUnknown) {
+				messengerLogger.Warnf("群消息发送结果未知，跳过自动重试以避免重复消息 (chunk %d/%d)", i+1, len(chunks))
+			} else if errors.Is(err, ErrRequestRejected) {
+				messengerLogger.Warnf("群消息被OneBot明确拒绝，不再自动重试 (chunk %d/%d)", i+1, len(chunks))
+			} else if errors.Is(err, ErrRequestNotSent) && getOfflineQueueEnable() {
+				m.saveOfflineMsg(newOfflineQueueMsg(groupCode, "group", chunkMsg, newstr))
+				m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+			} else if !errors.Is(err, ErrRequestNotSent) {
+				messengerLogger.Warnf("群消息发送错误未明确标记为写入前失败，不自动重试 (chunk %d/%d)", i+1, len(chunks))
+			}
 			lastResult = SendResp{
 				RetMSG: &GroupMessage{ID: -1},
 				Error:  err,
@@ -280,16 +304,11 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 }
 
 func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
-	// 检查离线队列条件（基于实际连接状态，避免心跳缓存滞后导致误判）
-	if getOfflineQueueEnable() && !m.isConnectionReady() {
+	// 检查离线队列条件（账号在线且 WS 已连接）
+	if getOfflineQueueEnable() && !m.isConnected() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
-		m.saveOfflineMsg(offlineQueueMsg{
-			TargetId:   target,
-			TargetType: "private",
-			Message:    msg,
-			NewStr:     newstr,
-			CreatedAt:  time.Now(),
-		})
+		m.saveOfflineMsg(newOfflineQueueMsg(target, "private", msg, newstr))
+		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
 		return &PrivateMessage{ID: -1}
 	}
 
@@ -322,6 +341,16 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 		m.privateSendCount.Add(1)
 		if err != nil {
 			messengerLogger.Errorf("Send private message failed (chunk %d/%d): %v", i+1, len(chunks), err)
+			if errors.Is(err, ErrRequestResultUnknown) {
+				messengerLogger.Warnf("私聊消息发送结果未知，跳过自动重试以避免重复消息 (chunk %d/%d)", i+1, len(chunks))
+			} else if errors.Is(err, ErrRequestRejected) {
+				messengerLogger.Warnf("私聊消息被OneBot明确拒绝，不再自动重试 (chunk %d/%d)", i+1, len(chunks))
+			} else if errors.Is(err, ErrRequestNotSent) && getOfflineQueueEnable() {
+				m.saveOfflineMsg(newOfflineQueueMsg(target, "private", chunkMsg, newstr))
+				m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+			} else if !errors.Is(err, ErrRequestNotSent) {
+				messengerLogger.Warnf("私聊消息发送错误未明确标记为写入前失败，不自动重试 (chunk %d/%d)", i+1, len(chunks))
+			}
 		} else {
 			lastMsgID = msgID
 		}
@@ -1138,19 +1167,16 @@ func (m *Messenger) IsListLoaded() bool {
 	return m.listLoaded.Load()
 }
 
-// isConnectionReady 返回当前是否具备实际投递能力
-// 优先使用 Adapter 的实际 WS 连接状态，避免心跳缓存 Online 滞后导致误判
-func (m *Messenger) isConnectionReady() bool {
-	if m.Adapter != nil {
-		return m.Adapter.IsConnected()
-	}
-	return m.Online.Load()
+// isConnected 返回当前是否具备实际投递能力：账号在线（心跳缓存）且 WS 已连接。
+// 两者缺一不可：心跳 Online 反映账号登录状态，Adapter 连接状态反映底层 socket。
+// 任一不可用都视为离线，交由离线队列暂存，避免在账号未在线或 socket 断开时误发。
+func (m *Messenger) isConnected() bool {
+	return m.Online.Load() && m.Adapter != nil && m.Adapter.IsConnected()
 }
 
-// IsConnected 返回当前 WS 连接是否在线
-// 优先使用 Adapter 的实际连接状态，避免心跳缓存 Online 滞后导致误判
+// IsConnected 返回当前是否具备投递能力（供外部模块判断发送/重连状态）
 func (m *Messenger) IsConnected() bool {
-	return m.isConnectionReady()
+	return m.isConnected()
 }
 
 func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
@@ -1668,11 +1694,21 @@ func getOfflineQueueExpire() time.Duration {
 	return t
 }
 
+func newOfflineQueueMsg(targetID int64, targetType string, msg *SendingMessage, newStr string) offlineQueueMsg {
+	return offlineQueueMsg{
+		TargetId:   targetID,
+		TargetType: targetType,
+		Message:    msg,
+		NewStr:     newStr,
+		CreatedAt:  time.Now(),
+	}
+}
+
 func (m *Messenger) saveOfflineMsg(msg offlineQueueMsg) {
 	m.offlineQueueMu.Lock()
 	defer m.offlineQueueMu.Unlock()
-	if len(m.offlineQueue) > 0 && cap(m.offlineQueue) >= 100 {
-		messengerLogger.Warnf("离线队列已满(%d)，丢弃最旧消息", cap(m.offlineQueue))
+	if len(m.offlineQueue) >= offlineQueueMaxSize {
+		messengerLogger.Warnf("离线队列已满(%d)，丢弃最旧消息", offlineQueueMaxSize)
 		m.offlineQueue = m.offlineQueue[1:]
 	}
 	m.offlineQueue = append(m.offlineQueue, msg)
@@ -1686,21 +1722,57 @@ func (m *Messenger) loadOfflineMsgs() []offlineQueueMsg {
 	return result
 }
 
-func (m *Messenger) clearOfflineMsgs() {
+func (m *Messenger) takeOfflineMsgs() []offlineQueueMsg {
 	m.offlineQueueMu.Lock()
 	defer m.offlineQueueMu.Unlock()
-	m.offlineQueue = make([]offlineQueueMsg, 0, 100)
+	result := m.offlineQueue
+	m.offlineQueue = make([]offlineQueueMsg, 0, offlineQueueMaxSize)
+	return result
+}
+
+func (m *Messenger) clearOfflineMsgs() {
+	m.takeOfflineMsgs()
+}
+
+func (m *Messenger) scheduleOfflineQueueFlush(delay time.Duration) {
+	if !getOfflineQueueEnable() || !m.offlineFlushScheduled.CompareAndSwap(false, true) {
+		return
+	}
+	time.AfterFunc(delay, func() {
+		m.offlineFlushScheduled.Store(false)
+		select {
+		case <-m.stopChan:
+			return
+		default:
+		}
+		if m.isConnected() {
+			m.flushOfflineQueue()
+		} else if len(m.loadOfflineMsgs()) > 0 {
+			// 定时器触发时仍断线也要继续等待，避免稍后重连后消息永久滞留。
+			m.scheduleOfflineQueueFlush(delay)
+		}
+	})
 }
 
 func (m *Messenger) flushOfflineQueue() {
 	if !getOfflineQueueEnable() {
 		return
 	}
-	msgs := m.loadOfflineMsgs()
+	m.offlineQueueFlushMu.Lock()
+	defer m.offlineQueueFlushMu.Unlock()
+
+	if !m.isConnected() {
+		return
+	}
+	msgs := m.takeOfflineMsgs()
+	if len(msgs) == 0 {
+		return
+	}
 	expire := getOfflineQueueExpire()
 	now := time.Now()
 	messengerLogger.Infof("BOT已上线，开始重发缓存的 %d 条离线消息", len(msgs))
 
+	failed := 0
 	for _, msg := range msgs {
 		if now.Sub(msg.CreatedAt) <= expire {
 			messages := m.buildMessageSegments(msg.Message)
@@ -1708,14 +1780,34 @@ func (m *Messenger) flushOfflineQueue() {
 			case "group":
 				msgID, err := m.Adapter.SendGroupMessage(msg.TargetId, messages)
 				if err != nil {
-					messengerLogger.Errorf("重发离线群消息失败: %v", err)
+					if errors.Is(err, ErrRequestResultUnknown) {
+						messengerLogger.Warnf("重发离线群消息超时，发送结果未知，不再重试: group=%d", msg.TargetId)
+					} else if errors.Is(err, ErrRequestRejected) {
+						messengerLogger.Warnf("重发离线群消息被OneBot明确拒绝，不再重试: group=%d", msg.TargetId)
+					} else if errors.Is(err, ErrRequestNotSent) {
+						messengerLogger.Errorf("重发离线群消息失败: %v", err)
+						m.saveOfflineMsg(msg)
+						failed++
+					} else {
+						messengerLogger.Warnf("重发离线群消息错误未明确标记为写入前失败，不再重试: group=%d error=%v", msg.TargetId, err)
+					}
 				} else {
 					messengerLogger.Debugf("离线群消息重发成功: group=%d, msgID=%d", msg.TargetId, msgID)
 				}
 			case "private":
 				msgID, err := m.Adapter.SendPrivateMessage(msg.TargetId, messages)
 				if err != nil {
-					messengerLogger.Errorf("重发离线私聊消息失败: %v", err)
+					if errors.Is(err, ErrRequestResultUnknown) {
+						messengerLogger.Warnf("重发离线私聊消息超时，发送结果未知，不再重试: user=%d", msg.TargetId)
+					} else if errors.Is(err, ErrRequestRejected) {
+						messengerLogger.Warnf("重发离线私聊消息被OneBot明确拒绝，不再重试: user=%d", msg.TargetId)
+					} else if errors.Is(err, ErrRequestNotSent) {
+						messengerLogger.Errorf("重发离线私聊消息失败: %v", err)
+						m.saveOfflineMsg(msg)
+						failed++
+					} else {
+						messengerLogger.Warnf("重发离线私聊消息错误未明确标记为写入前失败，不再重试: user=%d error=%v", msg.TargetId, err)
+					}
 				} else {
 					messengerLogger.Debugf("离线私聊消息重发成功: user=%d, msgID=%d", msg.TargetId, msgID)
 				}
@@ -1726,7 +1818,9 @@ func (m *Messenger) flushOfflineQueue() {
 			messengerLogger.Infof("丢弃过期离线消息: %s", msg.NewStr)
 		}
 	}
-	m.clearOfflineMsgs()
+	if failed > 0 {
+		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+	}
 }
 
 func sliceMessage(str string) string {

@@ -6,13 +6,13 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
 )
 
-// GroupConcernConfig 创建一个新结构，准备重写 FilterHook
+// GroupConcernConfig 在通用配置上扩展Twitter推送回调。
 type GroupConcernConfig struct {
 	concern.IConfig
 	concern *twitterConcern
 }
 
-// FilterHook 委托给基础实现，支持关键字黑白名单过滤
+// FilterHook 保留通用关键词过滤；ConcernNewsNotify会直接提供模板动态文字，避免提前渲染消息。
 func (g *GroupConcernConfig) FilterHook(notify concern.Notify) *concern.HookResult {
 	return g.IConfig.FilterHook(notify)
 }

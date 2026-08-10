@@ -1602,22 +1602,41 @@ func TestIsSingleElement(t *testing.T) {
 	}
 }
 
-// TestMessengerIsConnected_UsesAdapterState 验证 IsConnected 优先使用
-// Adapter 的实际连接状态，而不是可能滞后的心跳缓存 Online。
-// 回归场景：心跳缓存滞后导致发送/重连逻辑误判。
+// TestMessengerIsConnected_UsesAdapterState 验证 IsConnected 需要账号在线
+// （心跳缓存）与 WS 实际连接同时成立，两者缺一不可。
+// 回归场景：账号未在线或 socket 断开时都应视为不可投递。
 func TestMessengerIsConnected_UsesAdapterState(t *testing.T) {
 	adapter := newMockAdapter()
 	messenger := NewMessenger(adapter)
 	defer messenger.Stop()
 
-	// 即使心跳缓存标记为离线，只要实际连接存在，应视为已连接
-	messenger.Online.Store(false)
-	assert.True(t, messenger.IsConnected(), "Adapter 已连接时应返回 true")
-
-	// 实际连接断开时返回 false
-	adapter.connected = false
+	// 心跳在线且连接就绪
 	messenger.Online.Store(true)
-	assert.False(t, messenger.IsConnected(), "Adapter 未连接时应返回 false")
+	adapter.connected = true
+	assert.True(t, messenger.IsConnected())
+
+	// 心跳缓存标记离线（如刚启动未收到心跳）时不可投递
+	messenger.Online.Store(false)
+	adapter.connected = true
+	assert.False(t, messenger.IsConnected(), "账号心跳离线时应返回 false")
+
+	// 实际连接断开时同样不可投递
+	messenger.Online.Store(true)
+	adapter.connected = false
+	assert.False(t, messenger.IsConnected(), "WS 连接断开时应返回 false")
+}
+
+// TestOfflineQueue_TakeClearsQueue 验证 takeOfflineMsgs 取出全部消息并清空队列。
+func TestOfflineQueue_TakeClearsQueue(t *testing.T) {
+	m, _, _ := setupTestMessenger(t)
+	defer m.Stop()
+
+	m.saveOfflineMsg(newOfflineQueueMsg(111, "group", &SendingMessage{}, "test"))
+	m.saveOfflineMsg(newOfflineQueueMsg(222, "private", &SendingMessage{}, "test"))
+
+	msgs := m.takeOfflineMsgs()
+	assert.Len(t, msgs, 2)
+	assert.Len(t, m.loadOfflineMsgs(), 0, "takeOfflineMsgs 应清空队列")
 }
 
 // TestMessengerRefreshList_FailureKeepsUnloaded 验证列表加载失败时不标记
