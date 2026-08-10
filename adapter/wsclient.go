@@ -3,6 +3,7 @@ package adapter
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -16,6 +17,17 @@ import (
 )
 
 var wsLogger = logrus.WithField("module", "wsclient")
+
+var (
+	// ErrRequestNotSent 表示请求在写入WebSocket前失败，可以安全重试。
+	ErrRequestNotSent = errors.New("request not sent")
+	// ErrRequestResultUnknown 表示请求可能已被OneBot处理，自动重试可能造成重复消息。
+	ErrRequestResultUnknown = errors.New("request result unknown")
+	// ErrRequestRejected 表示OneBot已明确拒绝请求，继续重试没有意义。
+	ErrRequestRejected = errors.New("request rejected")
+	// ErrRequestTimeout 保留旧名称兼容调用方；超时属于发送结果未知。
+	ErrRequestTimeout = ErrRequestResultUnknown
+)
 
 // isDebugLoggingEnabled 检查当前是否启用 debug 级别日志，用于热路径中避免调用 runtime.Caller
 func isDebugLoggingEnabled() bool {
@@ -52,8 +64,8 @@ const (
 	// 动态写入超时计算参数（参考 NapCat/LLOneBot 实现）
 	// 公式: baseTimeout + (dataSizeBytes / 1024 / speedKBps * 1000)
 	writeWaitBase    = 10 * time.Second // 基础超时 10s
-	writeWaitSpeedKB = 256             // 假设传输速率 256 KB/s（与 NapCat 一致）
-	writeWaitMax      = 30 * time.Minute // 最大超时 30min（与 NapCat 一致）
+	writeWaitSpeedKB = 256              // 假设传输速率 256 KB/s（与 NapCat 一致）
+	writeWaitMax     = 30 * time.Minute // 最大超时 30min（与 NapCat 一致）
 )
 
 type WSResponse struct {
@@ -578,7 +590,7 @@ func (c *WSClient) SendAndWait(action string, params map[string]any, timeout tim
 	req := map[string]any{"action": action, "params": params, "echo": echo}
 	data, err := json.Marshal(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: encode request: %v", ErrRequestRejected, err)
 	}
 	if err := c.SendRawData(data); err != nil {
 		return nil, err
@@ -586,14 +598,21 @@ func (c *WSClient) SendAndWait(action string, params map[string]any, timeout tim
 	select {
 	case resp, ok := <-ch:
 		if !ok {
-			return nil, fmt.Errorf("connection closed")
+			return nil, fmt.Errorf("%w: connection closed while waiting for echo", ErrRequestResultUnknown)
 		}
-		if resp.Status == "ok" || resp.Retcode == 0 {
+		if resp.Status == "ok" || (resp.Status == "" && resp.Retcode == 0) {
 			return resp, nil
 		}
-		return resp, fmt.Errorf("api error: %s", resp.Message)
+		reason := resp.Message
+		if reason == "" {
+			reason = resp.Msg
+		}
+		if reason == "" {
+			reason = resp.Wording
+		}
+		return resp, fmt.Errorf("%w: retcode=%d message=%s", ErrRequestRejected, resp.Retcode, reason)
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("timeout")
+		return nil, fmt.Errorf("%w: timeout waiting for echo", ErrRequestResultUnknown)
 	}
 }
 
@@ -608,7 +627,11 @@ func (c *WSClient) SendRawData(data []byte) error {
 		wsLogger.Debugf("<<< mu.RUnlock() #%d  caller=%s  [SendRawData]", nextLockSeq(), getCallerFuncName(2))
 	}
 	if conn == nil {
-		return fmt.Errorf("not connected")
+		return fmt.Errorf("%w: not connected", ErrRequestNotSent)
 	}
-	return c.writeRaw(conn, websocket.TextMessage, data)
+	if err := c.writeRaw(conn, websocket.TextMessage, data); err != nil {
+		// WriteMessage可能已写入部分或全部数据，不能安全地假设远端未处理。
+		return fmt.Errorf("%w: websocket write failed: %v", ErrRequestResultUnknown, err)
+	}
+	return nil
 }

@@ -1,7 +1,9 @@
 package adapter
 
 import (
+	"errors"
 	"fmt"
+	"github.com/Sora233/MiraiGo-Template/config"
 	"github.com/stretchr/testify/assert"
 	"strings"
 	"sync"
@@ -57,6 +59,54 @@ func (m *mockAdapter) SendGroupMessage(groupID int64, message interface{}) (int3
 }
 func (m *mockAdapter) SendPrivateMessage(userID int64, message interface{}) (int32, error) {
 	return 1, nil
+}
+
+type retryMockAdapter struct {
+	*mockAdapter
+	mu             sync.Mutex
+	groupErrors    []error
+	groupSendCount int
+	connected      bool
+}
+
+func newRetryMockAdapter(groupErrors ...error) *retryMockAdapter {
+	return &retryMockAdapter{
+		mockAdapter: newMockAdapter(),
+		groupErrors: groupErrors,
+		connected:   true,
+	}
+}
+
+func (m *retryMockAdapter) IsConnected() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.connected
+}
+
+func (m *retryMockAdapter) setConnected(connected bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.connected = connected
+}
+
+func (m *retryMockAdapter) SendGroupMessage(groupID int64, message interface{}) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.groupSendCount++
+	if len(m.groupErrors) > 0 {
+		err := m.groupErrors[0]
+		m.groupErrors = m.groupErrors[1:]
+		if err != nil {
+			return 0, err
+		}
+	}
+	return int32(m.groupSendCount), nil
+}
+
+func (m *retryMockAdapter) sendCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.groupSendCount
 }
 func (m *mockAdapter) SendGroupForwardMessage(groupID int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
 	return 1, "", nil
@@ -923,6 +973,235 @@ func TestMessengerHandleRequestEvent_GroupInvited(t *testing.T) {
 	req := dispatcher.getGroupInvited()
 	assert.NotNil(t, req, "GroupInvitedRequest should be dispatched")
 	assert.Equal(t, "test_group_invite_flag_xyz789", req.Flag, "flag should match event.Flag")
+}
+
+func TestOfflineQueue_RetriesFailedGroupMessage(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: not connected", ErrRequestNotSent))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "retry me"})
+	resp := messenger.SendGroupMessage(545402644, msg, "retry me")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, int64(-1), resp.RetMSG.ID)
+	assert.Eventually(t, func() bool {
+		return mock.sendCount() == 2 && len(messenger.loadOfflineMsgs()) == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestOfflineQueue_DoesNotRetryTimedOutGroupMessage(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(ErrRequestTimeout)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "unknown result"})
+	resp := messenger.SendGroupMessage(545402644, msg, "unknown result")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestTimeout)
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 1, mock.sendCount())
+}
+
+func TestOfflineQueue_DoesNotRetryUnknownResultAfterDisconnect(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: connection closed while waiting for echo", ErrRequestResultUnknown))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "unknown after disconnect"})
+	resp := messenger.SendGroupMessage(545402644, msg, "unknown after disconnect")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestResultUnknown)
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 1, mock.sendCount())
+}
+
+func TestOfflineQueue_DoesNotRetryRejectedGroupMessage(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: retcode=1200 message=bot muted", ErrRequestRejected))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "do not retry"})
+	resp := messenger.SendGroupMessage(545402644, msg, "do not retry")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestRejected)
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 1, mock.sendCount())
+}
+
+func TestOfflineQueue_DoesNotRetryUnclassifiedAdapterError(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(errors.New("satori request failed"))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "unclassified error"})
+	resp := messenger.SendGroupMessage(545402644, msg, "unclassified error")
+
+	assert.Error(t, resp.Error)
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 1, mock.sendCount())
+}
+
+func TestOfflineQueue_FlushesAfterReconnectWithoutLifecycleEvent(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter()
+	mock.setConnected(false)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	// 模拟只有WebSocket断线，未收到新的lifecycle事件，Messenger的Online仍为true。
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "send after reconnect"})
+	resp := messenger.SendGroupMessage(545402644, msg, "send after reconnect")
+	assert.NoError(t, resp.Error)
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+
+	// 先让一次定时刷新在断线状态下触发，确认它不会永久退出。
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 0, mock.sendCount())
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+
+	mock.setConnected(true)
+	assert.Eventually(t, func() bool {
+		return mock.sendCount() == 1 && len(messenger.loadOfflineMsgs()) == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestOfflineQueue_FlushDropsTimedOutMessages(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: not connected", ErrRequestNotSent), ErrRequestTimeout)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "keep me"})
+	messenger.SendGroupMessage(545402644, msg, "keep me")
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+
+	messenger.flushOfflineQueue()
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	assert.Equal(t, 2, mock.sendCount())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 2, mock.sendCount())
+}
+
+func TestOfflineQueue_FlushDropsUnclassifiedAdapterError(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	oldDelay := offlineQueueRetryDelay
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	offlineQueueRetryDelay = 10 * time.Millisecond
+	defer func() {
+		config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+		offlineQueueRetryDelay = oldDelay
+	}()
+
+	mock := newRetryMockAdapter(errors.New("satori response lost"))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+	messenger.saveOfflineMsg(newOfflineQueueMsg(545402644, "group", &SendingMessage{}, "queued"))
+
+	messenger.flushOfflineQueue()
+
+	assert.Empty(t, messenger.loadOfflineMsgs())
+	time.Sleep(3 * offlineQueueRetryDelay)
+	assert.Equal(t, 1, mock.sendCount())
+}
+
+func TestOfflineQueue_MaxSizeDropsOnlyOldest(t *testing.T) {
+	messenger, _, _ := setupTestMessenger(t)
+	defer messenger.Stop()
+
+	for i := 0; i < offlineQueueMaxSize+1; i++ {
+		messenger.saveOfflineMsg(offlineQueueMsg{
+			TargetId:   int64(i),
+			TargetType: "group",
+			Message:    &SendingMessage{},
+			CreatedAt:  time.Now(),
+		})
+	}
+
+	msgs := messenger.loadOfflineMsgs()
+	assert.Len(t, msgs, offlineQueueMaxSize)
+	assert.Equal(t, int64(1), msgs[0].TargetId)
+	assert.Equal(t, int64(offlineQueueMaxSize), msgs[len(msgs)-1].TargetId)
 }
 
 // TestOfflineQueue_SaveAndLoad tests saving and loading offline messages.
