@@ -63,6 +63,48 @@ type SendResp struct {
 	Error  error
 }
 
+// PrivateSendStatus 表示私聊消息发送的最终状态
+type PrivateSendStatus int
+
+const (
+	// PrivateSendSent 已发送成功（RetMSG.ID >= 0）
+	PrivateSendSent PrivateSendStatus = iota
+	// PrivateSendQueued 已进入离线队列，稍后重发（尚未真正投递）
+	PrivateSendQueued
+	// PrivateSendNotSent 未发送：写入前失败且未入离线队列，可安全重试
+	PrivateSendNotSent
+	// PrivateSendUnknown 发送结果未知：请求可能已到达 OneBot，重试可能造成重复
+	PrivateSendUnknown
+	// PrivateSendRejected 被 OneBot 明确拒绝，重试无意义
+	PrivateSendRejected
+)
+
+// PrivateSendResp 私聊消息发送结果
+// 与 SendResp 对齐，显式携带 Error 供调用方区分发送状态，
+// 避免调用方仅凭 ID/连接状态推断结果造成误判。
+type PrivateSendResp struct {
+	RetMSG *PrivateMessage
+	Error  error
+	// Queued 表示消息已进入离线队列等待重发（尚未真正投递）
+	Queued bool
+}
+
+// Status 根据 Error 与 Queued 计算明确的发送状态
+func (r PrivateSendResp) Status() PrivateSendStatus {
+	switch {
+	case r.Queued:
+		return PrivateSendQueued
+	case r.Error == nil:
+		return PrivateSendSent
+	case errors.Is(r.Error, ErrRequestNotSent):
+		return PrivateSendNotSent
+	case errors.Is(r.Error, ErrRequestRejected):
+		return PrivateSendRejected
+	default:
+		return PrivateSendUnknown
+	}
+}
+
 // offlineQueueMsg 离线消息结构
 // TargetType: "group" 表示群消息, "private" 表示私聊消息
 type offlineQueueMsg struct {
@@ -291,13 +333,13 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 	return lastResult
 }
 
-func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
+func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) PrivateSendResp {
 	// 检查离线队列条件（账号在线且 WS 已连接）
 	if getOfflineQueueEnable() && !m.isConnected() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
 		m.saveOfflineMsg(newOfflineQueueMsg(target, "private", msg, newstr))
 		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
-		return &PrivateMessage{ID: -1}
+		return PrivateSendResp{RetMSG: &PrivateMessage{ID: -1}, Queued: true}
 	}
 
 	// 获取好友昵称
@@ -315,6 +357,8 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 	chunks := m.buildMessageChunks(msg)
 
 	var lastMsgID int32 = -1
+	var lastErr error
+	queued := false
 	for i, chunk := range chunks {
 		// 构建新的 SendingMessage
 		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
@@ -328,6 +372,7 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 		msgID, err := m.Adapter.SendPrivateMessage(target, messages)
 		m.privateSendCount.Add(1)
 		if err != nil {
+			lastErr = err
 			messengerLogger.Errorf("Send private message failed (chunk %d/%d): %v", i+1, len(chunks), err)
 			if errors.Is(err, ErrRequestResultUnknown) {
 				messengerLogger.Warnf("私聊消息发送结果未知，跳过自动重试以避免重复消息 (chunk %d/%d)", i+1, len(chunks))
@@ -336,23 +381,29 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 			} else if errors.Is(err, ErrRequestNotSent) && getOfflineQueueEnable() {
 				m.saveOfflineMsg(newOfflineQueueMsg(target, "private", chunkMsg, newstr))
 				m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+				queued = true
 			} else if !errors.Is(err, ErrRequestNotSent) {
 				messengerLogger.Warnf("私聊消息发送错误未明确标记为写入前失败，不自动重试 (chunk %d/%d)", i+1, len(chunks))
 			}
 		} else {
 			lastMsgID = msgID
+			lastErr = nil
 		}
 	}
 
-	return &PrivateMessage{
-		ID:     int64(lastMsgID),
-		UserID: target,
-		Self:   m.Uin,
-		Sender: &SenderInfo{
-			UserID: m.Uin,
-			Uin:    m.Uin,
+	return PrivateSendResp{
+		RetMSG: &PrivateMessage{
+			ID:     int64(lastMsgID),
+			UserID: target,
+			Self:   m.Uin,
+			Sender: &SenderInfo{
+				UserID: m.Uin,
+				Uin:    m.Uin,
+			},
+			Elements: msg.Elements,
 		},
-		Elements: msg.Elements,
+		Error:  lastErr,
+		Queued: queued,
 	}
 }
 

@@ -1237,7 +1237,8 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 		return &adapter.PrivateMessage{ID: -1}
 	}
 	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
-	res = bot.Instance.SendPrivateMessage(uin, msg, newstring)
+	resp := bot.Instance.SendPrivateMessage(uin, msg, newstring)
+	res = resp.RetMSG
 	if res == nil || res.ID == -1 {
 		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
 			WithFields(localutils.GroupLogFields(uin)).

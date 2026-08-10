@@ -195,19 +195,24 @@ func TestEventBusBotOnlineMultipleSubscribers(t *testing.T) {
 }
 
 // TestIsAuthFailure_Classification 验证错误分类：
-// 鉴权失效（Cookie/SUB 失效、HTTP 4xx、响应解析失败）不应被当成网络错误，
-// 否则 Cookie/SUB 真正失效时告警会被一直跳过。
+// 只把登录页响应（HTML JSON 解析失败）和 HTTP 401/403 归为凭据失效，
+// 429 限流、414 请求错误、空响应/截断 JSON 等按临时错误或状态未知处理，
+// 避免非鉴权错误错误触发凭据失效告警。
 func TestIsAuthFailure_Classification(t *testing.T) {
-	// 明确的鉴权失效：API 返回 HTML 登录页
+	// 明确的凭据失效：API 返回 HTML 登录页
 	assert.True(t, isAuthFailure(errors.New("invalid character '<' looking for beginning of value")))
-	assert.True(t, isAuthFailure(errors.New("unexpected end of JSON input")))
 
-	// 响应解析失败
-	assert.True(t, isAuthFailure(errors.New("cannot unmarshal number into Go value of type string")))
-
-	// HTTP 4xx：请求已到达服务器但被拒绝
+	// 明确的鉴权拒绝：HTTP 401/403
+	assert.True(t, isAuthFailure(errors.New("http code error 401")))
 	assert.True(t, isAuthFailure(errors.New("http code error 403")))
-	assert.True(t, isAuthFailure(errors.New("http code error 414")))
+
+	// 空响应/截断 JSON：可能是临时上游故障，不应视为凭据失效
+	assert.False(t, isAuthFailure(errors.New("unexpected end of JSON input")))
+	assert.False(t, isAuthFailure(errors.New("cannot unmarshal number into Go value of type string")))
+
+	// 非鉴权类 HTTP 4xx：429 限流、414 请求错误，不应触发凭据失效告警
+	assert.False(t, isAuthFailure(errors.New("http code error 429")))
+	assert.False(t, isAuthFailure(errors.New("http code error 414")))
 
 	// 网络层错误：DNS、超时、连接拒绝，以及 HTTP 5xx 服务端错误
 	assert.False(t, isAuthFailure(errors.New("dial tcp 127.0.0.1:80: connect: connection refused")))

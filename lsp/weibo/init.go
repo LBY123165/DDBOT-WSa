@@ -9,6 +9,7 @@ import (
 
 	"github.com/Sora233/MiraiGo-Template/bot"
 	"github.com/Sora233/MiraiGo-Template/config"
+	"github.com/cnxysoft/DDBOT-WSa/adapter"
 	localdb "github.com/cnxysoft/DDBOT-WSa/lsp/buntdb"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/cfg"
 	"github.com/cnxysoft/DDBOT-WSa/lsp/concern"
@@ -328,18 +329,22 @@ func sendPrivateAlert(qq int64, isRecovery bool) bool {
 
 	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
 
-	// 仅在发送成功或确认进入离线队列后设置告警去重标记
-	// WS 连接就绪时 ID==-1 表示发送失败，不设置去重以便重试
-	// WS 离线时 ID==-1 表示已进入离线队列，视为成功
-	// 使用实际连接状态而非心跳缓存 Online，避免滞后导致误判
+	// 仅在发送成功或确认进入离线队列后设置告警去重标记。
+	// 直接依据底层返回的明确发送状态判断，不再根据发送后的连接状态推断结果，
+	// 避免"连接检查通过后、真正写入前断线"（ErrRequestNotSent 且未入队）被误判为已投递。
 	delivered := false
 	if !isRecovery {
-		if bot.Instance.Messenger.IsConnected() && resp.ID == -1 {
-			logger.WithField("QQ", qq).Warn("私聊告警发送失败，不设置去重标记以便重试")
-		} else {
+		switch resp.Status() {
+		case adapter.PrivateSendSent, adapter.PrivateSendQueued:
 			_ = c.StateManager.Set(alertKey, "",
 				localdb.SetExpireOpt(time.Hour*2), localdb.SetNoOverWriteOpt())
 			delivered = true
+		case adapter.PrivateSendNotSent:
+			logger.WithField("QQ", qq).Warn("私聊告警未发送（写入前失败且未入队），不设置去重标记以便重试")
+		case adapter.PrivateSendUnknown:
+			logger.WithField("QQ", qq).Warn("私聊告警发送结果未知，不设置去重标记以便下轮重试")
+		case adapter.PrivateSendRejected:
+			logger.WithField("QQ", qq).Warn("私聊告警被 OneBot 明确拒绝，不设置去重标记")
 		}
 	} else {
 		delivered = true
@@ -550,14 +555,15 @@ func sendSUBExpiredAlert(qq int64) bool {
 
 	resp := bot.Instance.SendPrivateMessage(qq, sm, summary)
 
-	if bot.Instance.Messenger.IsConnected() && resp.ID == -1 {
-		logger.WithField("QQ", qq).Warn("SUB 过期告警发送失败，清除去重标记以便重试")
+	// 直接依据底层返回的明确发送状态判断，不再依赖发送后的连接状态推断结果
+	if resp.Status() != adapter.PrivateSendSent && resp.Status() != adapter.PrivateSendQueued {
+		logger.WithField("QQ", qq).WithField("Status", resp.Status()).
+			Warn("SUB 过期告警私聊发送失败，清除去重标记以便重试")
 		clearAlertDedup(c.StateManager.SUBExpiredAlertKey(-qq))
 		return false
-	} else {
-		logger.WithField("QQ", qq).Info("已发送微博 SUB 过期告警私聊")
-		return true
 	}
+	logger.WithField("QQ", qq).Info("已发送微博 SUB 过期告警私聊")
+	return true
 }
 
 // sendSUBExpiredGroupAlert 群发 SUB 过期告警

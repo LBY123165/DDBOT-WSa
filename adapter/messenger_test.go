@@ -73,6 +73,7 @@ type retryMockAdapter struct {
 	mu             sync.Mutex
 	groupErrors    []error
 	groupSendCount int
+	privateErrors  []error
 	connected      bool
 }
 
@@ -108,6 +109,19 @@ func (m *retryMockAdapter) SendGroupMessage(groupID int64, message interface{}) 
 		}
 	}
 	return int32(m.groupSendCount), nil
+}
+
+func (m *retryMockAdapter) SendPrivateMessage(userID int64, message interface{}) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.privateErrors) > 0 {
+		err := m.privateErrors[0]
+		m.privateErrors = m.privateErrors[1:]
+		if err != nil {
+			return 0, err
+		}
+	}
+	return 1, nil
 }
 
 func (m *retryMockAdapter) sendCount() int {
@@ -1952,6 +1966,122 @@ func TestMessengerRefreshList_MemberFailureKeepsUnloaded(t *testing.T) {
 	assert.Eventually(t, func() bool {
 		return messenger.IsListLoaded()
 	}, 2*time.Second, 20*time.Millisecond, "后台重试应最终标记加载完成")
+}
+
+// TestPrivateSendResp_Status 验证私聊发送结果五态分类：
+// 已发送、已入队、未发送、结果未知、明确拒绝
+func TestPrivateSendResp_Status(t *testing.T) {
+	// 已发送
+	assert.Equal(t, PrivateSendSent,
+		(PrivateSendResp{RetMSG: &PrivateMessage{ID: 42}}).Status())
+	// 已入队（发送前离线检查入队，Error 为 nil）
+	assert.Equal(t, PrivateSendQueued,
+		(PrivateSendResp{RetMSG: &PrivateMessage{ID: -1}, Queued: true}).Status())
+	// 已入队（写入前失败但离线队列开启，Error 非 nil 仍应归类为已入队）
+	assert.Equal(t, PrivateSendQueued,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+			Queued: true,
+		}).Status())
+	// 未发送：写入前失败且未入队
+	assert.Equal(t, PrivateSendNotSent,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+		}).Status())
+	// 结果未知：超时或未分类错误
+	assert.Equal(t, PrivateSendUnknown,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: timeout", ErrRequestResultUnknown),
+		}).Status())
+	assert.Equal(t, PrivateSendUnknown,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  errors.New("some unclassified error"),
+		}).Status())
+	// 明确拒绝
+	assert.Equal(t, PrivateSendRejected,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: rejected", ErrRequestRejected),
+		}).Status())
+}
+
+// TestSendPrivateMessage_NotSentWhenWriteFailsAfterConnectCheck
+// 回归场景：连接检查通过后、真正写入前断线（ErrRequestNotSent），离线队列默认关闭。
+// 此前 SendPrivateMessage 吞掉错误只返回 ID=-1，告警代码凭发送后的连接状态误判为
+// "已入队"并设置两小时去重，实际消息未发送也不会及时重试。
+// 现在错误必须被传递出来，状态为 PrivateSendNotSent，且不会入离线队列。
+func TestSendPrivateMessage_NotSentWhenWriteFailsAfterConnectCheck(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{fmt.Errorf("%w: not connected", ErrRequestNotSent)}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.False(t, resp.Queued)
+	assert.Equal(t, int64(-1), resp.RetMSG.ID)
+	assert.Equal(t, PrivateSendNotSent, resp.Status())
+	assert.Empty(t, messenger.loadOfflineMsgs(), "离线队列关闭时不应入队")
+}
+
+// TestSendPrivateMessage_QueuedWhenOffline
+// 离线队列开启且 WS 未连接时，消息应入队并标记 Queued，状态为 PrivateSendQueued。
+func TestSendPrivateMessage_QueuedWhenOffline(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.setConnected(false)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.True(t, resp.Queued)
+	assert.Nil(t, resp.Error)
+	assert.Equal(t, int64(-1), resp.RetMSG.ID)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+// TestSendPrivateMessage_QueuedWhenNotSentAndQueueEnabled
+// ErrRequestNotSent 且离线队列开启时，消息应入队并标记 Queued，
+// 状态为 PrivateSendQueued（而非 PrivateSendNotSent）。
+func TestSendPrivateMessage_QueuedWhenNotSentAndQueueEnabled(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{fmt.Errorf("%w: not connected", ErrRequestNotSent)}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.True(t, resp.Queued)
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
 }
 
 // TestMessengerRefreshList_RetrySucceeds 验证列表加载失败后后台重试成功，

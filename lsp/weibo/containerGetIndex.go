@@ -559,9 +559,12 @@ func isCookieFailure(err error) bool {
 		strings.Contains(msg, "looking for beginning of value")
 }
 
-// isAuthFailure 判断错误是否属于明确的鉴权/请求被拒绝（非网络层错误）
-// 包括：Cookie 失效返回 HTML 导致的 JSON 解析失败、HTTP 4xx 拒绝、响应解析失败
-// 用于区分"SUB 真正失效"与"网络暂时不可用"，避免鉴权失效时告警被一直跳过
+// isAuthFailure 判断错误是否属于明确的凭据失效（非网络层错误）
+// 只把以下情况归类为凭据失效：
+// - Cookie/SUB 失效返回登录页 HTML 导致的 JSON 解析失败（isCookieFailure）
+// - HTTP 401/403 明确鉴权拒绝
+// 其余情况（429 限流、414 请求错误、空响应/截断 JSON、5xx 服务端错误等）按临时错误
+// 或状态未知处理，避免 429/414 等非鉴权错误错误触发凭据失效告警。
 func isAuthFailure(err error) bool {
 	if err == nil {
 		return false
@@ -570,13 +573,9 @@ func isAuthFailure(err error) bool {
 	if isCookieFailure(err) {
 		return true
 	}
-	// 响应已成功返回但无法解析（空响应、非法 JSON 等），多半是鉴权/反爬拦截
-	if strings.Contains(msg, "unexpected end of JSON input") ||
-		strings.Contains(msg, "cannot unmarshal") {
-		return true
-	}
-	// HTTP 4xx：请求已到达服务器但被拒绝（403 反爬、414 参数过长等）
-	if strings.Contains(msg, "http code error 4") {
+	// 微博明确拒绝凭据的 HTTP 状态码：401 未授权、403 禁止
+	if strings.Contains(msg, "http code error 401") ||
+		strings.Contains(msg, "http code error 403") {
 		return true
 	}
 	return false
