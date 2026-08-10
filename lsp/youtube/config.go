@@ -129,13 +129,13 @@ func (g *GroupConcernConfig) FilterHook(notify concern.Notify) *concern.HookResu
 					return hook
 				}
 			case concern.FilterTypeText, concern.FilterTypeNotText:
-				// Text filtering handled by base config
+				// Text filtering handled below via base config
 				continue
 			}
 		}
 
-		hook.Pass = true
-		return hook
+		// Delegate text filtering to base config
+		return g.IConfig.FilterHook(notify)
 	default:
 		hook.Pass = true
 		return hook

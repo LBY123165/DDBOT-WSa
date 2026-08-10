@@ -50,6 +50,10 @@ var json = jsoniter.ConfigCompatibleWithStandardLibrary
 
 var Debug = false
 
+// SkipOnlineCheck 为 true 时跳过等待 bot 上线，直接启动订阅系统
+// 通过启动参数 --online 设置，用于调试或无 WS 连接的场景
+var SkipOnlineCheck = false
+
 type Lsp struct {
 	pool          image_pool.Pool
 	concernNotify <-chan concern.Notify
@@ -938,8 +942,40 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	}()
 	l.CronjobReload()
 	l.CronStart()
-	concern.StartAll()
-	l.started.Store(true)
+
+	// 等待 bot 上线后再启动订阅系统，避免 not connected 和 nil group info 错误
+	go func() {
+		if SkipOnlineCheck {
+			logger.Warn("本次启动已跳过 bot 上线等待流程（--online）")
+			// --online 模式仍需启动订阅系统，否则微博/B站等订阅任务不会运行
+			concern.StartAll()
+			l.started.Store(true)
+			logger.Infof("DDBOT启动完成（--online 调试模式）")
+		} else {
+			// 首次等待：5 分钟超时
+			if !waitForBotOnline(l, bot, 5*time.Minute) {
+				logger.Errorf("首次等待 bot 上线超时，将在后台继续重试...")
+			}
+		}
+
+		// 如果仍需要等待，在后台持续重试（每30秒检查一次）
+		if !SkipOnlineCheck && !l.started.Load() {
+			go func() {
+				retryTicker := time.NewTicker(30 * time.Second)
+				defer retryTicker.Stop()
+				for range retryTicker.C {
+					if l.started.Load() {
+						return
+					}
+					logger.Info("后台重试：等待 bot 上线...")
+					if waitForBotOnline(l, bot, 30*time.Second) {
+						return
+					}
+					logger.Debug("后台重试：bot 仍未上线，继续等待...")
+				}
+			}()
+		}
+	}()
 
 	// 启动TG适配器
 	l.StartTelegramCommands()
@@ -953,13 +989,39 @@ func (l *Lsp) PostStart(bot *bot.Bot) {
 	}()
 	go l.NewVersionNotify(newVersionChan)
 
+}
+
+// waitForBotOnline 等待 bot 上线并完成群列表加载，超时返回 false
+func waitForBotOnline(l *Lsp, b *bot.Bot, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+
+	logger.Infof("等待 bot 上线（超时 %v）...", timeout)
+	// 基于实际 WS 连接状态等待，避免心跳缓存 Online 滞后导致误判
+	for b.Messenger == nil || !b.Messenger.IsConnected() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+	// 等待群/好友/群成员列表加载完成，不依赖固定 Sleep
+	logger.Info("bot 已上线，等待群列表加载完成...")
+	for b.Messenger == nil || !b.Messenger.IsListLoaded() {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Second)
+	}
+	logger.Info("群列表加载完成，启动订阅系统")
+
+	concern.StartAll()
+	l.started.Store(true)
 	logger.Infof("DDBOT启动完成")
 	logger.Infof("D宝，一款真正人性化的单推BOT")
 	if len(l.PermissionStateManager.ListAdmin()) == 0 {
 		logger.Infof("您似乎正在部署全新的BOT，请通过qq对bot私聊发送<%v>(不含括号)获取管理员权限，然后私聊发送<%v>(不含括号)开始使用您的bot",
 			l.CommandShowName(WhosyourdaddyCommand), l.CommandShowName(HelpCommand))
 	}
-
+	return true
 }
 
 func (l *Lsp) Start(bot *bot.Bot) {
@@ -1162,7 +1224,9 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 		logger.WithFields(localutils.FriendLogFields(uin)).Debug("send with nil private message")
 		return &adapter.PrivateMessage{ID: -1}
 	}
-	if bot.Instance == nil || !bot.Instance.Online.Load() {
+	// 不在此处依据连接状态短路：由 Messenger.SendPrivateMessage 统一处理
+	// 在线直接发送、离线且开启离线队列时入队，避免依赖可能滞后的 Online 心跳缓存误判
+	if bot.Instance == nil || bot.Instance.Messenger == nil {
 		return &adapter.PrivateMessage{ID: -1, UserID: uin, Elements: msg.Elements}
 	}
 	msg.Elements = localutils.AdapterMessageFilter(msg.Elements, func(element adapter.IMessageElement) bool {
@@ -1173,7 +1237,8 @@ func (l *Lsp) sendPrivateMessage(uin int64, msg *adapter.SendingMessage) (res *a
 		return &adapter.PrivateMessage{ID: -1}
 	}
 	var newstring = msgstringer.AdapterMsgToString(msg.Elements)
-	res = bot.Instance.SendPrivateMessage(uin, msg, newstring)
+	resp := bot.Instance.SendPrivateMessage(uin, msg, newstring)
+	res = resp.RetMSG
 	if res == nil || res.ID == -1 {
 		logger.WithField("content", msgstringer.AdapterMsgToString(msg.Elements)).
 			WithFields(localutils.GroupLogFields(uin)).

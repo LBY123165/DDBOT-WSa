@@ -16,12 +16,19 @@ type mockAdapter struct {
 	groupList       []*GroupInfo
 	groupMemberList map[int64][]*GroupMemberInfo
 	strangerInfo    map[int64]map[string]interface{}
+
+	connected bool
+	// 错误注入
+	friendListErr  error
+	groupListErr   error
+	groupMemberErr error
 }
 
 func newMockAdapter() *mockAdapter {
 	return &mockAdapter{
 		groupMemberList: make(map[int64][]*GroupMemberInfo),
 		strangerInfo:    make(map[int64]map[string]interface{}),
+		connected:       true,
 	}
 }
 
@@ -29,7 +36,7 @@ func (m *mockAdapter) Start() error                                     { return
 func (m *mockAdapter) Stop() error                                      { return nil }
 func (m *mockAdapter) GetSelfID() int64                                 { return 1143469507 }
 func (m *mockAdapter) GetAdapterName() string                           { return "mock" }
-func (m *mockAdapter) IsConnected() bool                                { return true }
+func (m *mockAdapter) IsConnected() bool                                { return m.connected }
 func (m *mockAdapter) GetFileUrl(groupCode int64, fileId string) string { return "" }
 func (m *mockAdapter) DownloadFile(url, base64, name string, headers []string) (string, error) {
 	return "", nil
@@ -63,10 +70,12 @@ func (m *mockAdapter) SendPrivateMessage(userID int64, message interface{}) (int
 
 type retryMockAdapter struct {
 	*mockAdapter
-	mu             sync.Mutex
-	groupErrors    []error
-	groupSendCount int
-	connected      bool
+	mu               sync.Mutex
+	groupErrors      []error
+	groupSendCount   int
+	privateErrors    []error
+	privateSendCount int
+	connected        bool
 }
 
 func newRetryMockAdapter(groupErrors ...error) *retryMockAdapter {
@@ -103,10 +112,30 @@ func (m *retryMockAdapter) SendGroupMessage(groupID int64, message interface{}) 
 	return int32(m.groupSendCount), nil
 }
 
+func (m *retryMockAdapter) SendPrivateMessage(userID int64, message interface{}) (int32, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.privateSendCount++
+	if len(m.privateErrors) > 0 {
+		err := m.privateErrors[0]
+		m.privateErrors = m.privateErrors[1:]
+		if err != nil {
+			return 0, err
+		}
+	}
+	return 1, nil
+}
+
 func (m *retryMockAdapter) sendCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.groupSendCount
+}
+
+func (m *retryMockAdapter) privateCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.privateSendCount
 }
 func (m *mockAdapter) SendGroupForwardMessage(groupID int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
 	return 1, "", nil
@@ -114,11 +143,24 @@ func (m *mockAdapter) SendGroupForwardMessage(groupID int64, nodes []map[string]
 func (m *mockAdapter) SendPrivateForwardMessage(userID int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
 	return 1, "", nil
 }
-func (m *mockAdapter) GetGroupList() ([]*GroupInfo, error) { return m.groupList, nil }
+func (m *mockAdapter) GetGroupList() ([]*GroupInfo, error) {
+	if m.groupListErr != nil {
+		return nil, m.groupListErr
+	}
+	return m.groupList, nil
+}
 func (m *mockAdapter) GetGroupMemberList(groupID int64) ([]*GroupMemberInfo, error) {
+	if m.groupMemberErr != nil {
+		return nil, m.groupMemberErr
+	}
 	return m.groupMemberList[groupID], nil
 }
-func (m *mockAdapter) GetFriendList() ([]*FriendInfo, error) { return nil, nil }
+func (m *mockAdapter) GetFriendList() ([]*FriendInfo, error) {
+	if m.friendListErr != nil {
+		return nil, m.friendListErr
+	}
+	return nil, nil
+}
 func (m *mockAdapter) GetStrangerInfo(userID int64) (map[string]interface{}, error) {
 	return m.strangerInfo[userID], nil
 }
@@ -1001,6 +1043,132 @@ func TestOfflineQueue_RetriesFailedGroupMessage(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestSendGroupMessage_QueuedWhenNotSentAndQueueEnabled(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter(fmt.Errorf("%w: not connected", ErrRequestNotSent))
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "queued group alert"})
+	resp := messenger.SendGroupMessage(545402644, msg, "queued group alert")
+
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+func TestSendResp_Status(t *testing.T) {
+	tests := []struct {
+		name string
+		resp SendResp
+		want GroupSendStatus
+	}{
+		{name: "sent", resp: SendResp{RetMSG: &GroupMessage{ID: 42}}, want: GroupSendSent},
+		{name: "queued", resp: SendResp{RetMSG: &GroupMessage{ID: -1}, Queued: true}, want: GroupSendQueued},
+		{name: "queued with write failure", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+			Queued: true,
+		}, want: GroupSendQueued},
+		{name: "not sent", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+		}, want: GroupSendNotSent},
+		{name: "unknown", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: timeout", ErrRequestResultUnknown),
+		}, want: GroupSendUnknown},
+		{name: "unclassified is unknown", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  errors.New("satori request failed"),
+		}, want: GroupSendUnknown},
+		{name: "rejected", resp: SendResp{
+			RetMSG: &GroupMessage{ID: -1},
+			Error:  fmt.Errorf("%w: bot muted", ErrRequestRejected),
+		}, want: GroupSendRejected},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, tc.resp.Status())
+		})
+	}
+}
+
+func TestSendGroupMessage_StopsAfterFirstFailedChunk(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(firstErr, nil)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength+100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendGroupMessage(545402644, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, GroupSendNotSent, resp.Status())
+	assert.Equal(t, 1, mock.sendCount(), "a failed chunk must stop the remaining chunks")
+}
+
+func TestSendGroupMessage_QueuesFailedAndRemainingChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(firstErr, nil)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength) + strings.Repeat("b", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendGroupMessage(545402644, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.Equal(t, 1, mock.sendCount(), "queued chunks must not continue through the adapter")
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2, "the failed chunk and every remaining chunk must be queued")
+	assert.Equal(t, content, queuedMessageText(queued))
+}
+
+func TestSendGroupMessage_DoesNotRequeueSuccessfulChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	writeErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter(nil, writeErr)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	first := strings.Repeat("a", MaxTextLength)
+	unsent := strings.Repeat("b", MaxTextLength) + strings.Repeat("c", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: first + unsent})
+	resp := messenger.SendGroupMessage(545402644, msg, first+unsent)
+
+	assert.Equal(t, GroupSendQueued, resp.Status())
+	assert.Equal(t, 2, mock.sendCount())
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2)
+	assert.Equal(t, unsent, queuedMessageText(queued), "successful chunks must not be queued again")
+}
+
 func TestOfflineQueue_DoesNotRetryTimedOutGroupMessage(t *testing.T) {
 	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
 	oldDelay := offlineQueueRetryDelay
@@ -1858,4 +2026,302 @@ func TestIsSingleElement(t *testing.T) {
 			assert.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestMessengerIsConnected_UsesAdapterState 验证 IsConnected 需要账号在线
+// （心跳缓存）与 WS 实际连接同时成立，两者缺一不可。
+// 回归场景：账号未在线或 socket 断开时都应视为不可投递。
+func TestMessengerIsConnected_UsesAdapterState(t *testing.T) {
+	adapter := newMockAdapter()
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+
+	// 心跳在线且连接就绪
+	messenger.Online.Store(true)
+	adapter.connected = true
+	assert.True(t, messenger.IsConnected())
+
+	// 心跳缓存标记离线（如刚启动未收到心跳）时不可投递
+	messenger.Online.Store(false)
+	adapter.connected = true
+	assert.False(t, messenger.IsConnected(), "账号心跳离线时应返回 false")
+
+	// 实际连接断开时同样不可投递
+	messenger.Online.Store(true)
+	adapter.connected = false
+	assert.False(t, messenger.IsConnected(), "WS 连接断开时应返回 false")
+}
+
+// TestOfflineQueue_TakeClearsQueue 验证 takeOfflineMsgs 取出全部消息并清空队列。
+func TestOfflineQueue_TakeClearsQueue(t *testing.T) {
+	m, _, _ := setupTestMessenger(t)
+	defer m.Stop()
+
+	m.saveOfflineMsg(newOfflineQueueMsg(111, "group", &SendingMessage{}, "test"))
+	m.saveOfflineMsg(newOfflineQueueMsg(222, "private", &SendingMessage{}, "test"))
+
+	msgs := m.takeOfflineMsgs()
+	assert.Len(t, msgs, 2)
+	assert.Len(t, m.loadOfflineMsgs(), 0, "takeOfflineMsgs 应清空队列")
+}
+
+// TestMessengerRefreshList_FailureKeepsUnloaded 验证列表加载失败时不标记
+// listLoaded，避免残缺列表被当成加载成功并启动订阅。
+func TestMessengerRefreshList_FailureKeepsUnloaded(t *testing.T) {
+	adapter := newMockAdapter()
+	adapter.friendListErr = errors.New("friend list unavailable")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	err := messenger.RefreshList()
+	assert.Error(t, err, "好友列表加载失败应返回错误")
+	assert.False(t, messenger.IsListLoaded(), "加载失败后不应标记加载完成")
+}
+
+// TestMessengerRefreshList_MemberFailureKeepsUnloaded 验证群成员加载失败
+// 同样不标记 listLoaded，且后台重试成功后恢复。
+func TestMessengerRefreshList_MemberFailureKeepsUnloaded(t *testing.T) {
+	oldInterval := listReloadRetryInterval
+	listReloadRetryInterval = 10 * time.Millisecond
+	defer func() { listReloadRetryInterval = oldInterval }()
+
+	adapter := newMockAdapter()
+	adapter.groupList = []*GroupInfo{{Uin: 111, Code: 111, Name: "G1"}}
+	adapter.groupMemberErr = errors.New("member api unavailable")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	err := messenger.RefreshList()
+	assert.Error(t, err, "群成员加载失败应返回错误")
+	assert.False(t, messenger.IsListLoaded(), "成员加载失败后不应标记加载完成")
+
+	// 修复成员接口后，后台重试应自动标记加载完成
+	adapter.groupMemberErr = nil
+	assert.Eventually(t, func() bool {
+		return messenger.IsListLoaded()
+	}, 2*time.Second, 20*time.Millisecond, "后台重试应最终标记加载完成")
+}
+
+// TestPrivateSendResp_Status 验证私聊发送结果五态分类：
+// 已发送、已入队、未发送、结果未知、明确拒绝
+func TestPrivateSendResp_Status(t *testing.T) {
+	// 已发送
+	assert.Equal(t, PrivateSendSent,
+		(PrivateSendResp{RetMSG: &PrivateMessage{ID: 42}}).Status())
+	// 已入队（发送前离线检查入队，Error 为 nil）
+	assert.Equal(t, PrivateSendQueued,
+		(PrivateSendResp{RetMSG: &PrivateMessage{ID: -1}, Queued: true}).Status())
+	// 已入队（写入前失败但离线队列开启，Error 非 nil 仍应归类为已入队）
+	assert.Equal(t, PrivateSendQueued,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+			Queued: true,
+		}).Status())
+	// 未发送：写入前失败且未入队
+	assert.Equal(t, PrivateSendNotSent,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: not connected", ErrRequestNotSent),
+		}).Status())
+	// 结果未知：超时或未分类错误
+	assert.Equal(t, PrivateSendUnknown,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: timeout", ErrRequestResultUnknown),
+		}).Status())
+	assert.Equal(t, PrivateSendUnknown,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  errors.New("some unclassified error"),
+		}).Status())
+	// 明确拒绝
+	assert.Equal(t, PrivateSendRejected,
+		(PrivateSendResp{
+			RetMSG: &PrivateMessage{ID: -1},
+			Error:  fmt.Errorf("%w: rejected", ErrRequestRejected),
+		}).Status())
+}
+
+// TestSendPrivateMessage_NotSentWhenWriteFailsAfterConnectCheck
+// 回归场景：连接检查通过后、真正写入前断线（ErrRequestNotSent），离线队列默认关闭。
+// 此前 SendPrivateMessage 吞掉错误只返回 ID=-1，告警代码凭发送后的连接状态误判为
+// "已入队"并设置两小时去重，实际消息未发送也不会及时重试。
+// 现在错误必须被传递出来，状态为 PrivateSendNotSent，且不会入离线队列。
+func TestSendPrivateMessage_NotSentWhenWriteFailsAfterConnectCheck(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{fmt.Errorf("%w: not connected", ErrRequestNotSent)}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.False(t, resp.Queued)
+	assert.Equal(t, int64(-1), resp.RetMSG.ID)
+	assert.Equal(t, PrivateSendNotSent, resp.Status())
+	assert.Empty(t, messenger.loadOfflineMsgs(), "离线队列关闭时不应入队")
+}
+
+// TestSendPrivateMessage_QueuedWhenOffline
+// 离线队列开启且 WS 未连接时，消息应入队并标记 Queued，状态为 PrivateSendQueued。
+func TestSendPrivateMessage_QueuedWhenOffline(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.setConnected(false)
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.True(t, resp.Queued)
+	assert.Nil(t, resp.Error)
+	assert.Equal(t, int64(-1), resp.RetMSG.ID)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+// TestSendPrivateMessage_QueuedWhenNotSentAndQueueEnabled
+// ErrRequestNotSent 且离线队列开启时，消息应入队并标记 Queued，
+// 状态为 PrivateSendQueued（而非 PrivateSendNotSent）。
+func TestSendPrivateMessage_QueuedWhenNotSentAndQueueEnabled(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{fmt.Errorf("%w: not connected", ErrRequestNotSent)}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: "alert"})
+	resp := messenger.SendPrivateMessage(123456, msg, "alert")
+
+	assert.True(t, resp.Queued)
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Len(t, messenger.loadOfflineMsgs(), 1)
+}
+
+func TestSendPrivateMessage_StopsAfterFirstFailedChunk(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", false)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{firstErr, nil}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength+100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendPrivateMessage(123456, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendNotSent, resp.Status())
+	assert.Equal(t, 1, mock.privateCount(), "a failed chunk must stop the remaining chunks")
+}
+
+func TestSendPrivateMessage_QueuesFailedAndRemainingChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	firstErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{firstErr, nil}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	content := strings.Repeat("a", MaxTextLength) + strings.Repeat("b", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: content})
+	resp := messenger.SendPrivateMessage(123456, msg, content)
+
+	assert.ErrorIs(t, resp.Error, ErrRequestNotSent)
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Equal(t, 1, mock.privateCount(), "queued chunks must not continue through the adapter")
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2, "the failed chunk and every remaining chunk must be queued")
+	assert.Equal(t, content, queuedMessageText(queued))
+}
+
+func TestSendPrivateMessage_DoesNotRequeueSuccessfulChunks(t *testing.T) {
+	oldEnable := config.GlobalConfig.GetBool("bot.offlineQueue.enable")
+	config.GlobalConfig.Set("bot.offlineQueue.enable", true)
+	defer config.GlobalConfig.Set("bot.offlineQueue.enable", oldEnable)
+
+	writeErr := fmt.Errorf("%w: not connected", ErrRequestNotSent)
+	mock := newRetryMockAdapter()
+	mock.privateErrors = []error{nil, writeErr}
+	messenger := NewMessenger(mock)
+	defer messenger.Stop()
+	messenger.Online.Store(true)
+
+	first := strings.Repeat("a", MaxTextLength)
+	unsent := strings.Repeat("b", MaxTextLength) + strings.Repeat("c", 100)
+	msg := &SendingMessage{}
+	msg.Append(&TextSegment{Content: first + unsent})
+	resp := messenger.SendPrivateMessage(123456, msg, first+unsent)
+
+	assert.Equal(t, PrivateSendQueued, resp.Status())
+	assert.Equal(t, 2, mock.privateCount())
+	queued := messenger.loadOfflineMsgs()
+	assert.Len(t, queued, 2)
+	assert.Equal(t, unsent, queuedMessageText(queued), "successful chunks must not be queued again")
+}
+
+func queuedMessageText(messages []offlineQueueMsg) string {
+	var result strings.Builder
+	for _, message := range messages {
+		for _, element := range message.Message.Elements {
+			if text, ok := element.(*TextSegment); ok {
+				result.WriteString(text.Content)
+			}
+		}
+	}
+	return result.String()
+}
+
+// TestMessengerRefreshList_RetrySucceeds 验证列表加载失败后后台重试成功，
+// 避免订阅系统因一次性失败而永久无法启动。
+func TestMessengerRefreshList_RetrySucceeds(t *testing.T) {
+	oldInterval := listReloadRetryInterval
+	listReloadRetryInterval = 10 * time.Millisecond
+	defer func() { listReloadRetryInterval = oldInterval }()
+
+	adapter := newMockAdapter()
+	adapter.friendListErr = errors.New("temporary failure")
+
+	messenger := NewMessenger(adapter)
+	defer messenger.Stop()
+	assert.Error(t, messenger.RefreshList())
+	assert.False(t, messenger.IsListLoaded())
+
+	// 修复适配器后，后台重试应成功
+	time.Sleep(50 * time.Millisecond)
+	adapter.friendListErr = nil
+
+	assert.Eventually(t, func() bool {
+		return messenger.IsListLoaded()
+	}, 2*time.Second, 20*time.Millisecond, "后台重试应最终标记加载完成")
 }

@@ -142,6 +142,8 @@ func refreshCookieWithAPI(sub string) {
 	}
 
 	visitorCookiesOpt.Store(opt)
+	// 同步更新运行时 SUB，保持后续刷新与自动刷新协程使用一致的值
+	setRuntimeSUB(newSub)
 	logger.Infof("微博 Cookie 已成功从 API 刷新，共加载 %d 个 cookie", len(opt))
 
 	// 刷新后验证 Cookie 是否有效

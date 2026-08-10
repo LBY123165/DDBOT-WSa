@@ -150,7 +150,7 @@ func sendBilibiliLoginExpiredAlertToAdmin(qq int64) bool {
 	msg := newBilibiliLoginExpiredAlertMessage().ToCombineMessage(mmsg.NewPrivateTarget(qq))
 	summary := msgstringer.AdapterMsgToString(msg.Elements)
 	result := bot.Instance.SendPrivateMessage(qq, msg, summary)
-	if result == nil || result.ID == -1 {
+	if result.Error != nil || result.RetMSG == nil || result.RetMSG.ID == -1 {
 		logger.WithField("QQ", qq).Error("发送B站登录失效预警失败")
 		return false
 	}

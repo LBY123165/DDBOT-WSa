@@ -52,6 +52,7 @@ const (
 	MaxTextLength = 4500 // 文本最大长度
 	MaxImageCount = 20   // 图片最大数量
 
+	// 离线消息队列上限
 	offlineQueueMaxSize = 100
 )
 
@@ -60,6 +61,82 @@ var offlineQueueRetryDelay = 5 * time.Second
 type SendResp struct {
 	RetMSG *GroupMessage
 	Error  error
+	// Queued 表示消息已进入离线队列等待重发（尚未真正投递）
+	Queued bool
+}
+
+// GroupSendStatus 表示群消息发送的最终状态
+type GroupSendStatus int
+
+const (
+	// GroupSendSent 已发送成功（RetMSG.ID >= 0）
+	GroupSendSent GroupSendStatus = iota
+	// GroupSendQueued 已进入离线队列，稍后重发（尚未真正投递）
+	GroupSendQueued
+	// GroupSendNotSent 未发送：写入前失败且未入离线队列，可安全重试
+	GroupSendNotSent
+	// GroupSendUnknown 发送结果未知：请求可能已到达 OneBot，重试可能造成重复
+	GroupSendUnknown
+	// GroupSendRejected 被 OneBot 明确拒绝，重试无意义
+	GroupSendRejected
+)
+
+// Status 根据 Error 与 Queued 计算明确的群消息发送状态
+func (r SendResp) Status() GroupSendStatus {
+	switch {
+	case r.Queued:
+		return GroupSendQueued
+	case r.Error == nil:
+		return GroupSendSent
+	case errors.Is(r.Error, ErrRequestNotSent):
+		return GroupSendNotSent
+	case errors.Is(r.Error, ErrRequestRejected):
+		return GroupSendRejected
+	default:
+		return GroupSendUnknown
+	}
+}
+
+// PrivateSendStatus 表示私聊消息发送的最终状态
+type PrivateSendStatus int
+
+const (
+	// PrivateSendSent 已发送成功（RetMSG.ID >= 0）
+	PrivateSendSent PrivateSendStatus = iota
+	// PrivateSendQueued 已进入离线队列，稍后重发（尚未真正投递）
+	PrivateSendQueued
+	// PrivateSendNotSent 未发送：写入前失败且未入离线队列，可安全重试
+	PrivateSendNotSent
+	// PrivateSendUnknown 发送结果未知：请求可能已到达 OneBot，重试可能造成重复
+	PrivateSendUnknown
+	// PrivateSendRejected 被 OneBot 明确拒绝，重试无意义
+	PrivateSendRejected
+)
+
+// PrivateSendResp 私聊消息发送结果
+// 与 SendResp 对齐，显式携带 Error 供调用方区分发送状态，
+// 避免调用方仅凭 ID/连接状态推断结果造成误判。
+type PrivateSendResp struct {
+	RetMSG *PrivateMessage
+	Error  error
+	// Queued 表示消息已进入离线队列等待重发（尚未真正投递）
+	Queued bool
+}
+
+// Status 根据 Error 与 Queued 计算明确的发送状态
+func (r PrivateSendResp) Status() PrivateSendStatus {
+	switch {
+	case r.Queued:
+		return PrivateSendQueued
+	case r.Error == nil:
+		return PrivateSendSent
+	case errors.Is(r.Error, ErrRequestNotSent):
+		return PrivateSendNotSent
+	case errors.Is(r.Error, ErrRequestRejected):
+		return PrivateSendRejected
+	default:
+		return PrivateSendUnknown
+	}
 }
 
 // offlineQueueMsg 离线消息结构
@@ -99,7 +176,19 @@ type Messenger struct {
 	offlineQueueMu        sync.Mutex
 	offlineQueueFlushMu   sync.Mutex
 	offlineFlushScheduled atomic.Bool
+
+	// listReloadRetryActive 标记列表重载重试协程是否已启动，防止重复启动
+	listReloadRetryActive atomic.Bool
+
+	// listLoaded 标记好友/群/群成员列表是否已完成首次加载
+	listLoaded atomic.Bool
 }
+
+// 列表加载重试参数
+var (
+	listReloadRetryInterval = 15 * time.Second
+	listReloadMaxRetries    = 10
+)
 
 func NewMessenger(adapter Adapter) *Messenger {
 	m := &Messenger{
@@ -155,6 +244,7 @@ func (m *Messenger) registerEventHandlers() {
 			m.Uin = event.SelfID
 			wasOnline := m.Online.Swap(true)
 			messengerLogger.Infof("Bot online: %d", m.Uin)
+			// 重连（lifecycle 事件）时同样刷新离线队列，避免心跳未翻转导致缓存消息滞留
 			if !wasOnline && getOfflineQueueEnable() {
 				go m.flushOfflineQueue()
 			}
@@ -208,12 +298,12 @@ func (m *Messenger) GetSelfID() int64 {
 }
 
 func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newstr string) SendResp {
-	// 检查离线队列条件
+	// 检查离线队列条件（账号在线且 WS 已连接）
 	if getOfflineQueueEnable() && !m.isConnected() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存消息: %s", sliceMessage(newstr))
 		m.saveOfflineMsg(newOfflineQueueMsg(groupCode, "group", msg, newstr))
 		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
-		return SendResp{RetMSG: &GroupMessage{ID: -1}, Error: nil}
+		return SendResp{RetMSG: &GroupMessage{ID: -1}, Queued: true}
 	}
 
 	// 获取群名称
@@ -249,12 +339,16 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 			} else if errors.Is(err, ErrRequestRejected) {
 				messengerLogger.Warnf("群消息被OneBot明确拒绝，不再自动重试 (chunk %d/%d)", i+1, len(chunks))
 			} else if errors.Is(err, ErrRequestNotSent) && getOfflineQueueEnable() {
-				m.saveOfflineMsg(newOfflineQueueMsg(groupCode, "group", chunkMsg, newstr))
-				m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+				m.queueUnsentChunks(groupCode, "group", chunks, i, newstr)
+				return SendResp{
+					RetMSG: &GroupMessage{ID: -1},
+					Error:  err,
+					Queued: true,
+				}
 			} else if !errors.Is(err, ErrRequestNotSent) {
 				messengerLogger.Warnf("群消息发送错误未明确标记为写入前失败，不自动重试 (chunk %d/%d)", i+1, len(chunks))
 			}
-			lastResult = SendResp{
+			return SendResp{
 				RetMSG: &GroupMessage{ID: -1},
 				Error:  err,
 			}
@@ -277,13 +371,13 @@ func (m *Messenger) SendGroupMessage(groupCode int64, msg *SendingMessage, newst
 	return lastResult
 }
 
-func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) *PrivateMessage {
-	// 检查离线队列条件
+func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr string) PrivateSendResp {
+	// 检查离线队列条件（账号在线且 WS 已连接）
 	if getOfflineQueueEnable() && !m.isConnected() {
 		messengerLogger.Warnf("BOT已离线，已开启离线缓存，将暂存私聊消息: %s", sliceMessage(newstr))
 		m.saveOfflineMsg(newOfflineQueueMsg(target, "private", msg, newstr))
 		m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
-		return &PrivateMessage{ID: -1}
+		return PrivateSendResp{RetMSG: &PrivateMessage{ID: -1}, Queued: true}
 	}
 
 	// 获取好友昵称
@@ -320,26 +414,46 @@ func (m *Messenger) SendPrivateMessage(target int64, msg *SendingMessage, newstr
 			} else if errors.Is(err, ErrRequestRejected) {
 				messengerLogger.Warnf("私聊消息被OneBot明确拒绝，不再自动重试 (chunk %d/%d)", i+1, len(chunks))
 			} else if errors.Is(err, ErrRequestNotSent) && getOfflineQueueEnable() {
-				m.saveOfflineMsg(newOfflineQueueMsg(target, "private", chunkMsg, newstr))
-				m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
+				m.queueUnsentChunks(target, "private", chunks, i, newstr)
+				return PrivateSendResp{
+					RetMSG: &PrivateMessage{ID: -1, UserID: target, Self: m.Uin, Elements: msg.Elements},
+					Error:  err,
+					Queued: true,
+				}
 			} else if !errors.Is(err, ErrRequestNotSent) {
 				messengerLogger.Warnf("私聊消息发送错误未明确标记为写入前失败，不自动重试 (chunk %d/%d)", i+1, len(chunks))
+			}
+			return PrivateSendResp{
+				RetMSG: &PrivateMessage{ID: -1, UserID: target, Self: m.Uin, Elements: msg.Elements},
+				Error:  err,
 			}
 		} else {
 			lastMsgID = msgID
 		}
 	}
 
-	return &PrivateMessage{
-		ID:     int64(lastMsgID),
-		UserID: target,
-		Self:   m.Uin,
-		Sender: &SenderInfo{
-			UserID: m.Uin,
-			Uin:    m.Uin,
+	return PrivateSendResp{
+		RetMSG: &PrivateMessage{
+			ID:     int64(lastMsgID),
+			UserID: target,
+			Self:   m.Uin,
+			Sender: &SenderInfo{
+				UserID: m.Uin,
+				Uin:    m.Uin,
+			},
+			Elements: msg.Elements,
 		},
-		Elements: msg.Elements,
 	}
+}
+
+// queueUnsentChunks 缓存发送失败的当前分片及尚未尝试的分片。
+// 已经成功发送的前序分片不会再次入队。
+func (m *Messenger) queueUnsentChunks(targetID int64, targetType string, chunks [][]MessageSegment, start int, newstr string) {
+	for _, chunk := range chunks[start:] {
+		chunkMsg := &SendingMessage{Elements: parseChunkToElements(chunk)}
+		m.saveOfflineMsg(newOfflineQueueMsg(targetID, targetType, chunkMsg, newstr))
+	}
+	m.scheduleOfflineQueueFlush(offlineQueueRetryDelay)
 }
 
 func (m *Messenger) SendGroupForwardMessage(groupCode int64, nodes []map[string]interface{}, options *ForwardOptions) (int32, string, error) {
@@ -1058,30 +1172,99 @@ func (m *Messenger) GetGroupInfo(groupCode int64) (*GroupInfo, error) {
 }
 
 func (m *Messenger) RefreshList() error {
+	err := m.reloadLists()
+	if err != nil {
+		messengerLogger.WithError(err).Error("列表加载不完整，不标记加载完成，将在后台重试")
+		m.startListReloadRetry()
+		return err
+	}
+	m.listLoaded.Store(true)
+	return nil
+}
+
+// reloadLists 加载好友、群组和群成员列表。
+// 任一列表加载失败都返回错误，避免残缺列表被当作加载成功并启动订阅。
+func (m *Messenger) reloadLists() error {
+	var listErr error
+
 	if err := m.ReloadFriendList(); err != nil {
 		messengerLogger.WithError(err).Error("unable to load friends list")
+		listErr = err
+	} else {
+		messengerLogger.Infof("已加载 %d 个好友", len(m.FriendList))
 	}
-	messengerLogger.Infof("已加载 %d 个好友", len(m.FriendList))
 
 	if err := m.ReloadGroupList(); err != nil {
 		messengerLogger.WithError(err).Error("unable to load groups list")
+		if listErr == nil {
+			listErr = err
+		}
+	} else {
+		messengerLogger.Infof("已加载 %d 个群组", len(m.GroupList))
 	}
-	messengerLogger.Infof("已加载 %d 个群组", len(m.GroupList))
+
+	// 好友/群列表失败时不再加载成员，避免在残缺列表上继续请求
+	if listErr != nil {
+		return listErr
+	}
 
 	var totalMembers int
 	for _, group := range m.GroupList {
 		members, err := m.GetGroupMembersByID(group.Code)
 		if err != nil {
 			messengerLogger.WithError(err).Errorf("unable to load group members for %d", group.Code)
+			if listErr == nil {
+				listErr = err
+			}
 			continue
 		}
 		totalMembers += len(group.Members)
 		messengerLogger.Debugf("群[%d]加载成员[%d]个", group.Code, len(members))
 	}
-
 	messengerLogger.Infof("已加载 %d 个群成员", totalMembers)
 
-	return nil
+	return listErr
+}
+
+// startListReloadRetry 启动列表重载重试协程，避免加载失败后订阅系统永久无法启动
+func (m *Messenger) startListReloadRetry() {
+	if !m.listReloadRetryActive.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer m.listReloadRetryActive.Store(false)
+		for i := 1; i <= listReloadMaxRetries; i++ {
+			time.Sleep(listReloadRetryInterval)
+			if m.listLoaded.Load() {
+				return
+			}
+			if err := m.reloadLists(); err != nil {
+				messengerLogger.WithError(err).Warnf("列表重载重试 %d/%d 失败，保持未加载状态", i, listReloadMaxRetries)
+				continue
+			}
+			m.listLoaded.Store(true)
+			messengerLogger.Info("列表重载重试成功，已标记加载完成")
+			return
+		}
+		messengerLogger.Error("列表多次重试仍失败，订阅系统将不会启动，请检查适配器连接后重启")
+	}()
+}
+
+// IsListLoaded 返回好友/群/群成员列表是否已完成首次加载
+func (m *Messenger) IsListLoaded() bool {
+	return m.listLoaded.Load()
+}
+
+// isConnected 返回当前是否具备实际投递能力：账号在线（心跳缓存）且 WS 已连接。
+// 两者缺一不可：心跳 Online 反映账号登录状态，Adapter 连接状态反映底层 socket。
+// 任一不可用都视为离线，交由离线队列暂存，避免在账号未在线或 socket 断开时误发。
+func (m *Messenger) isConnected() bool {
+	return m.Online.Load() && m.Adapter != nil && m.Adapter.IsConnected()
+}
+
+// IsConnected 返回当前是否具备投递能力（供外部模块判断发送/重连状态）
+func (m *Messenger) IsConnected() bool {
+	return m.isConnected()
 }
 
 func (m *Messenger) handleNoticeEvent(event *NoticeEvent) {
@@ -1637,10 +1820,6 @@ func (m *Messenger) takeOfflineMsgs() []offlineQueueMsg {
 
 func (m *Messenger) clearOfflineMsgs() {
 	m.takeOfflineMsgs()
-}
-
-func (m *Messenger) isConnected() bool {
-	return m.Online.Load() && m.Adapter != nil && m.Adapter.IsConnected()
 }
 
 func (m *Messenger) scheduleOfflineQueueFlush(delay time.Duration) {

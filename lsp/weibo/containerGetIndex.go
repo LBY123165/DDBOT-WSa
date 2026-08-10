@@ -559,6 +559,28 @@ func isCookieFailure(err error) bool {
 		strings.Contains(msg, "looking for beginning of value")
 }
 
+// isAuthFailure 判断错误是否属于明确的凭据失效（非网络层错误）
+// 只把以下情况归类为凭据失效：
+// - Cookie/SUB 失效返回登录页 HTML 导致的 JSON 解析失败（isCookieFailure）
+// - HTTP 401/403 明确鉴权拒绝
+// 其余情况（429 限流、414 请求错误、空响应/截断 JSON、5xx 服务端错误等）按临时错误
+// 或状态未知处理，避免 429/414 等非鉴权错误错误触发凭据失效告警。
+func isAuthFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if isCookieFailure(err) {
+		return true
+	}
+	// 微博明确拒绝凭据的 HTTP 状态码：401 未授权、403 禁止
+	if strings.Contains(msg, "http code error 401") ||
+		strings.Contains(msg, "http code error 403") {
+		return true
+	}
+	return false
+}
+
 func GetUserPage(id int64, Opts ...requests.Option) error {
 	return requests.Get(CreateGuestReferer(id), nil, nil, Opts...)
 }
