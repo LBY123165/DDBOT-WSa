@@ -26,6 +26,7 @@ import (
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool"
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool/local_proxy_pool"
 	"github.com/cnxysoft/DDBOT-WSa/proxy_pool/py"
+	"github.com/cnxysoft/DDBOT-WSa/proxy_pool/system_proxy"
 	localutils "github.com/cnxysoft/DDBOT-WSa/utils"
 	"github.com/cnxysoft/DDBOT-WSa/utils/msgstringer"
 	"github.com/fsnotify/fsnotify"
@@ -212,6 +213,23 @@ func (l *Lsp) Init() {
 		proxy_pool.Init(pool)
 		log.WithField("local_proxy_num", len(proxies)).Debug("debug")
 		l.status.ProxyPoolEnable = true
+	case "systemProxy":
+		// 自动检测系统代理，仅用于海外请求（X、YouTube 等）
+		sysProxy, enabled := system_proxy.DetectSystemProxy()
+		if enabled && sysProxy != "" {
+			log.Infof("检测到系统代理: %s（仅用于海外请求）", sysProxy)
+			proxies := []*local_proxy_pool.Proxy{
+				{
+					Type:  proxy_pool.PreferOversea,
+					Proxy: sysProxy,
+				},
+			}
+			pool := local_proxy_pool.NewLocalPool(proxies)
+			proxy_pool.Init(pool)
+			l.status.ProxyPoolEnable = true
+		} else {
+			log.Warn("未检测到系统代理或系统代理未启用")
+		}
 	case "off":
 		log.Debug("proxy pool turn off")
 	default:
@@ -223,6 +241,11 @@ func (l *Lsp) Init() {
 	}
 	cfg.ReloadCustomCommandPrefix()
 	config.GlobalConfig.OnConfigChange(func(in fsnotify.Event) {
+		// 如果正在写入配置，跳过这次热重载
+		if cfg.IsWritingInProgress() {
+			logrus.WithField("config", "GlobalConfig").Debug("配置文件变更被忽略（正在写入中）")
+			return
+		}
 		go cfg.ReloadCustomCommandPrefix()
 		l.CronjobReload()
 	})

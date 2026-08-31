@@ -371,14 +371,20 @@ func (t *twitterConcern) notifyGenerator() concern.NotifyGeneratorFunc {
 }
 
 // 新增辅助函数获取刷新间隔
+// 始终强制 120s 下限（降低封号/限速风险），用户配置小于该值时提醒并采信下限
 func getRefreshInterval() time.Duration {
+	minInterval := time.Second * 120
 	if config.GlobalConfig != nil {
 		interval := config.GlobalConfig.GetDuration("twitter.interval")
 		if interval > 0 {
+			if interval < minInterval {
+				logger.Warnf("twitter.interval=%v 低于下限 120s，已强制采用 120s", interval)
+				return minInterval
+			}
 			return interval
 		}
 	}
-	return time.Second * 30
+	return minInterval // 默认120秒，降低请求频率
 }
 
 func (t *twitterConcern) processUsers(ctx context.Context, eventChan chan<- concern.Event) {
@@ -458,6 +464,8 @@ func (t *twitterConcern) processHomeTimeline(ctx context.Context, eventChan chan
 		}
 
 		if pass := t.filterTweet(tweet); pass {
+			// fetch 阶段异步启动翻译，推送时读取缓存，避免阻塞推送管线
+			StartAsyncTranslate(tweet)
 			event := &NewsInfo{
 				UserInfo: userInfo,
 				Tweet:    tweet,
@@ -480,7 +488,9 @@ func (t *twitterConcern) fresh() concern.FreshFunc {
 			select {
 			case <-ti.C:
 				t.processUsers(ctx, eventChan)
-				ti.Reset(interval) // 重置定时器
+				// 添加随机抖动，避免固定间隔被识别为机器人
+				jitter := time.Duration(rand.Intn(30)) * time.Second // 0-30秒随机抖动
+				ti.Reset(interval + jitter)
 			case <-ctx.Done():
 				return
 			}
@@ -502,6 +512,8 @@ func (t *twitterConcern) freshNewsInfo(ctype concern_type.Type, id interface{}) 
 		}
 		for _, tweet := range newTweets {
 			if pass := t.filterTweet(tweet); pass {
+				// fetch 阶段异步启动翻译，推送时读取缓存，避免阻塞推送管线
+				StartAsyncTranslate(tweet)
 				res := &NewsInfo{
 					UserInfo: userInfo,
 					Tweet:    tweet,
@@ -543,14 +555,14 @@ func SetRequestOptions() []requests.Option {
 		requests.HeaderOption("sec-ch-ua-platform-version", "19.0.0"),
 		requests.HeaderOption("sec-ch-ua-model", "navigate"),
 		requests.HeaderOption("Sec-Fetch-Site", "none"),
-		requests.HeaderOption("sec-ch-ua", "\"Microsoft Edge\";v=\"135\", \"Not-A.Brand\";v=\"8\", \"Chromium\";v=\"135\""),
+		requests.HeaderOption("sec-ch-ua", "\"Chromium\";v=\"149\", \"Not)A;Brand\";v=\"24\""),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", "\"Windows\""),
-		requests.HeaderOption("sec-ch-ua-full-version", "\"135.0.3179.73\""),
+		requests.HeaderOption("sec-ch-ua-full-version", "\"149.0.4650.56\""),
 		requests.HeaderOption("sec-ch-ua-arch", "\"x86\""),
 		requests.HeaderOption("sec-ch-ua-bitness", "64"),
 		requests.HeaderOption("sec-ch-ua-full-version-list",
-			"\"Microsoft Edge\";v=\"135.0.3179.73\", \"Not-A.Brand\";v=\"8.0.0.0\", \"Chromium\";v=\"135.0.7049.85\""),
+			"\"Chromium\";v=\"149.0.4650.56\", \"Not)A;Brand\";v=\"24.0.0.0\", \"Google Chrome\";v=\"149.0.4650.56\""),
 		requests.HeaderOption("Upgrade-Insecure-Requests", "1"),
 		requests.HeaderOption("Sec-Fetch-Dest", "document"),
 		requests.HeaderOption("Sec-Fetch-Mode", "navigate"),

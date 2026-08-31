@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -37,7 +38,7 @@ var queryIdMutex sync.RWMutex
 
 // QueryIdCache 保存从 LoggedInMain bundle 提取的所有 queryId
 type QueryIdCache struct {
-	UpdatedAt time.Time          `json:"updated_at"`
+	UpdatedAt  time.Time         `json:"updated_at"`
 	Operations map[string]string `json:"operations"` // operationName -> queryId
 }
 
@@ -83,7 +84,7 @@ func GetProfileSpotlightsQueryId() string {
 			return id
 		}
 	}
-	return "mzoqrVGwk-YTSGME1dRfXQ" // fallback 硬编码
+	return "mzoqrVGwk-YTSGME1dRfXQ" // fallback 硬编码（从抓包获取）
 }
 
 // IsCacheExpired 检查缓存是否过期
@@ -758,9 +759,9 @@ func (t *TwitterAPI) HomeTimeline(ctx context.Context, cursor string) (*HomeTime
 	}
 
 	variables := HomeTimelineVariables{
-		Count:                  20,
+		Count:                  10, // 减少每次拉取数量，降低请求频率
 		EnableRanking:          false,
-		IncludePromotedContent: true,
+		IncludePromotedContent: false, // 关闭推广内容，减少不必要的数据
 		RequestContext:         "launch",
 		SeenTweetIDs:           []string{},
 		Cursor:                 cursor,
@@ -870,9 +871,9 @@ func (t *TwitterAPI) homeTimelineWithRefresh(ctx context.Context, cursor string,
 	}
 
 	variables := HomeTimelineVariables{
-		Count:                  20,
+		Count:                  10, // 减少每次拉取数量，降低请求频率
 		EnableRanking:          false,
-		IncludePromotedContent: true,
+		IncludePromotedContent: false, // 关闭推广内容，减少不必要的数据
 		RequestContext:         "launch",
 		SeenTweetIDs:           []string{},
 		Cursor:                 cursor,
@@ -976,7 +977,13 @@ func (t *TwitterAPI) homeTimelineWithRefresh(ctx context.Context, cursor string,
 	return t.parseTimelineResponse(resp.Data.Home.HomeTimelineURT)
 }
 
-func (t *TwitterAPI) doPost(_ context.Context, apiURL string, body []byte, out any) error {
+func (t *TwitterAPI) doPost(ctx context.Context, apiURL string, body []byte, out any) error {
+	// 等待限流器
+	if !apiWait(ctx) {
+		return fmt.Errorf("aborted while waiting for rate limiter: %w", ctx.Err())
+	}
+
+	var httpCode int
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -987,7 +994,7 @@ func (t *TwitterAPI) doPost(_ context.Context, apiURL string, body []byte, out a
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "en-US,en;q=0.9"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.HeaderOption("sec-ch-ua", `"Chromium";v="135", "Not-A.Brand";v="8"`),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
 		requests.HeaderOption("sec-fetch-dest", "empty"),
@@ -997,29 +1004,49 @@ func (t *TwitterAPI) doPost(_ context.Context, apiURL string, body []byte, out a
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
 		requests.CookieOption("ct0", t.ct0),
 		requests.CookieOption("auth_token", t.authToken),
-		requests.RetryOption(3),
+		requests.RetryOption(1), // 降低重试次数，避免被识别为机器人
+		requests.HttpCodeOption(&httpCode),
 	}
 
 	var rawResp []byte
 	err := requests.PostBody(apiURL, body, &rawResp, opts...)
 	if err != nil {
+		if httpCode == http.StatusTooManyRequests {
+			api429()
+			return fmt.Errorf("rate limit exceeded (429)")
+		}
+		apiError()
 		return fmt.Errorf("POST request failed: %w", err)
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
+		apiError()
 		return fmt.Errorf("decompress failed: %w", err)
+	}
+
+	// 检查是否包含429错误（HTTP 状态码或响应体）
+	if isRateLimited(httpCode, decompressed) {
+		api429()
+		return fmt.Errorf("rate limit exceeded (429)")
 	}
 
 	err = json.Unmarshal(decompressed, out)
 	if err != nil {
+		apiError()
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	apiSuccess()
 	return nil
 }
 
 func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineRequest, out any) error {
+	// 等待限流器
+	if !apiWait(ctx) {
+		return fmt.Errorf("aborted while waiting for rate limiter: %w", ctx.Err())
+	}
+
 	variablesJson, err := json.Marshal(req.Variables)
 	if err != nil {
 		return fmt.Errorf("failed to marshal variables: %w", err)
@@ -1030,6 +1057,7 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 		return fmt.Errorf("failed to marshal features: %w", err)
 	}
 
+	var httpCode int
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -1039,7 +1067,7 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "en-US,en;q=0.9"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.HeaderOption("sec-ch-ua", `"Chromium";v="135", "Not-A.Brand";v="8"`),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
 		requests.HeaderOption("sec-fetch-dest", "empty"),
@@ -1049,7 +1077,8 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
 		requests.CookieOption("ct0", t.ct0),
 		requests.CookieOption("auth_token", t.authToken),
-		requests.RetryOption(3),
+		requests.RetryOption(1), // 降低重试次数，避免被识别为机器人
+		requests.HttpCodeOption(&httpCode),
 	}
 
 	getURL := apiURL + "?variables=" + url.QueryEscape(string(variablesJson)) + "&features=" + url.QueryEscape(string(featuresJson))
@@ -1057,19 +1086,33 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 	var rawResp []byte
 	err = requests.Get(getURL, nil, &rawResp, opts...)
 	if err != nil {
+		if httpCode == http.StatusTooManyRequests {
+			api429()
+			return fmt.Errorf("rate limit exceeded (429)")
+		}
+		apiError()
 		return fmt.Errorf("GET request failed: %w", err)
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
+		apiError()
 		return fmt.Errorf("decompress failed: %w", err)
+	}
+
+	// 检查是否包含429错误（HTTP 状态码或响应体）
+	if isRateLimited(httpCode, decompressed) {
+		api429()
+		return fmt.Errorf("rate limit exceeded (429)")
 	}
 
 	err = json.Unmarshal(decompressed, out)
 	if err != nil {
+		apiError()
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
+	apiSuccess()
 	return nil
 }
 
@@ -1088,6 +1131,43 @@ func decompressResponse(data []byte) ([]byte, error) {
 	default:
 		return data, nil
 	}
+}
+
+// isRateLimited 判断响应是否命中限速（429）
+// 优先使用 HTTP 状态码；兼容响应体内的两种限速表示：
+//   - GraphQL 错误格式 {"errors":[{"code":88,...}]}，限速错误码为 88
+//   - REST 错误格式 {"title":"Too Many Requests",...,"status":429}
+func isRateLimited(httpCode int, body []byte) bool {
+	if httpCode == http.StatusTooManyRequests {
+		return true
+	}
+
+	// 结构化判断，避免推文 FullText 中自带的 "code":88 / "status":429 字面量造成误判
+	var errResp struct {
+		Errors []struct {
+			Code int `json:"code"`
+		} `json:"errors"`
+		Status int `json:"status"`
+	}
+	if err := json.Unmarshal(body, &errResp); err == nil {
+		for _, e := range errResp.Errors {
+			if e.Code == 88 {
+				return true
+			}
+		}
+		if errResp.Status == http.StatusTooManyRequests {
+			return true
+		}
+		return false
+	}
+
+	// 仅在解析失败时回退到字面量匹配，兼容非标准响应
+	return bytes.Contains(body, []byte(`"code":88`)) ||
+		bytes.Contains(body, []byte(`"code": 88`)) ||
+		bytes.Contains(body, []byte(`"status":429`)) ||
+		bytes.Contains(body, []byte(`"status": 429`)) ||
+		bytes.Contains(body, []byte(`"code":429`)) ||
+		bytes.Contains(body, []byte(`"code": 429`))
 }
 
 func decompressGzip(data []byte) ([]byte, error) {
@@ -1224,8 +1304,13 @@ func (t *TwitterAPI) parseRetweetEntry(result *TweetResult) *Tweet {
 		Media:       make([]*Media, 0),
 	}
 
+	if result.Legacy != nil {
+		tweet.TranslationLang = result.Legacy.Lang // 提取语言信息用于翻译判断
+	}
+
 	if original.Legacy != nil {
 		tweet.CreatedAt = parseTwitterDate(result.Legacy.CreatedAt)
+		tweet.TranslationLang = original.Legacy.Lang // 转发推文使用原始推文的语言
 		if original.Legacy.ExtendedEntities != nil && len(original.Legacy.ExtendedEntities.Media) > 0 {
 			for _, m := range original.Legacy.ExtendedEntities.Media {
 				media := &Media{
@@ -1251,6 +1336,7 @@ func (t *TwitterAPI) parseRetweetEntry(result *TweetResult) *Tweet {
 				tweet.QuoteTweet.ID = quotedOriginal.Legacy.IDStr
 				tweet.QuoteTweet.Content = quotedOriginal.Legacy.FullText
 				tweet.QuoteTweet.CreatedAt = parseTwitterDate(quotedOriginal.Legacy.CreatedAt)
+				tweet.QuoteTweet.TranslationLang = quotedOriginal.Legacy.Lang // 提取引用推文的语言信息
 				if quotedOriginal.Legacy.ExtendedEntities != nil {
 					for _, m := range quotedOriginal.Legacy.ExtendedEntities.Media {
 						media := &Media{
@@ -1349,9 +1435,11 @@ func (t *TwitterAPI) parseQuoteEntry(result *TweetResult) *Tweet {
 		tweet.Retweets = result.Legacy.RetweetCount
 		tweet.Replies = result.Legacy.ReplyCount
 		tweet.CreatedAt = parseTwitterDate(result.Legacy.CreatedAt) // 引用这条推文的时间
+		tweet.TranslationLang = result.Legacy.Lang                  // 提取语言信息用于翻译判断
 	}
 
 	if quotedResult.Legacy != nil {
+		tweet.QuoteTweet.TranslationLang = quotedResult.Legacy.Lang // 提取引用推文的语言信息
 		if quotedResult.Legacy.ExtendedEntities != nil && len(quotedResult.Legacy.ExtendedEntities.Media) > 0 {
 			for _, m := range quotedResult.Legacy.ExtendedEntities.Media {
 				media := &Media{
@@ -1410,6 +1498,7 @@ func (t *TwitterAPI) parseOriginalTweet(result *TweetResult) *Tweet {
 		tweet.Likes = legacy.FavoriteCount
 		tweet.Retweets = legacy.RetweetCount
 		tweet.Replies = legacy.ReplyCount
+		tweet.TranslationLang = legacy.Lang // 提取语言信息用于翻译判断
 
 		if legacy.CreatedAt != "" {
 			tweet.CreatedAt = parseTwitterDate(legacy.CreatedAt)
@@ -1473,6 +1562,11 @@ func (t *TwitterAPI) Unfollow(ctx context.Context, userId string) error {
 }
 
 func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) error {
+	// 等待限流器
+	if !apiWait(ctx) {
+		return fmt.Errorf("aborted while waiting for rate limiter: %w", ctx.Err())
+	}
+
 	if !t.IsEnabled() {
 		return errors.New("twitter API not configured with cookies")
 	}
@@ -1484,6 +1578,7 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 		userId,
 	)
 
+	var httpCode int
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -1494,7 +1589,7 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.HeaderOption("sec-ch-ua", `"Chromium";v="135", "Not-A.Brand";v="8"`),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
 		requests.HeaderOption("sec-fetch-dest", "empty"),
@@ -1504,19 +1599,32 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 		requests.HeaderOption("X-Twitter-Auth-Type", "OAuth2Session"),
 		requests.CookieOption("ct0", t.ct0),
 		requests.CookieOption("auth_token", t.authToken),
-		requests.RetryOption(3),
+		requests.RetryOption(1), // 降低重试次数
+		requests.HttpCodeOption(&httpCode),
 	}
 
 	var rawResp []byte
 	body := []byte(formData)
 	err := requests.PostBody(apiURL, body, &rawResp, opts...)
 	if err != nil {
+		if httpCode == http.StatusTooManyRequests {
+			api429()
+			return fmt.Errorf("rate limit exceeded (429)")
+		}
+		apiError()
 		return fmt.Errorf("follow/unfollow request failed: %w", err)
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
+		apiError()
 		return fmt.Errorf("decompress failed: %w", err)
+	}
+
+	// 检查是否包含429错误（HTTP 状态码或响应体）
+	if isRateLimited(httpCode, decompressed) {
+		api429()
+		return fmt.Errorf("rate limit exceeded (429)")
 	}
 
 	// Check for error response
@@ -1528,6 +1636,7 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 	}
 	if err := json.Unmarshal(decompressed, &errResp); err == nil {
 		if len(errResp.Errors) > 0 {
+			apiError()
 			return fmt.Errorf("follow/unfollow error: %s (code: %d)", errResp.Errors[0].Message, errResp.Errors[0].Code)
 		}
 	}
@@ -1539,13 +1648,16 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 		Following  bool   `json:"following"`
 	}
 	if err := json.Unmarshal(decompressed, &userResp); err != nil {
+		apiError()
 		return fmt.Errorf("failed to parse follow/unfollow response: %w", err)
 	}
 
 	if userResp.ID == "" {
+		apiError()
 		return errors.New("follow/unfollow failed: no user id in response")
 	}
 
+	apiSuccess()
 	return nil
 }
 
@@ -1560,6 +1672,11 @@ type UserProfileInfo struct {
 // GetUserByScreenName fetches user profile info by screen name using GraphQL API
 // Returns UserProfileInfo with following status and user details
 func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string) (*UserProfileInfo, error) {
+	// 等待限流器
+	if !apiWait(ctx) {
+		return nil, fmt.Errorf("aborted while waiting for rate limiter: %w", ctx.Err())
+	}
+
 	if !t.IsEnabled() {
 		return nil, errors.New("twitter API not configured with cookies")
 	}
@@ -1576,6 +1693,7 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	var httpCode int
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -1586,7 +1704,7 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.HeaderOption("sec-ch-ua", `"Chromium";v="135", "Not-A.Brand";v="8"`),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
 		requests.HeaderOption("sec-fetch-dest", "empty"),
@@ -1597,18 +1715,31 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 		requests.HeaderOption("Referer", fmt.Sprintf("https://x.com/%s", screenName)),
 		requests.CookieOption("ct0", t.ct0),
 		requests.CookieOption("auth_token", t.authToken),
-		requests.RetryOption(3),
+		requests.RetryOption(1), // 降低重试次数
+		requests.HttpCodeOption(&httpCode),
 	}
 
 	var rawResp []byte
 	err = requests.PostBody(apiURL, reqBytes, &rawResp, opts...)
 	if err != nil {
+		if httpCode == http.StatusTooManyRequests {
+			api429()
+			return nil, fmt.Errorf("rate limit exceeded (429)")
+		}
+		apiError()
 		return nil, fmt.Errorf("ProfileSpotlightsQuery request failed: %w", err)
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
+		apiError()
 		return nil, fmt.Errorf("decompress failed: %w", err)
+	}
+
+	// 检查是否包含429错误（HTTP 状态码或响应体）
+	if isRateLimited(httpCode, decompressed) {
+		api429()
+		return nil, fmt.Errorf("rate limit exceeded (429)")
 	}
 
 	var resp struct {
@@ -1634,11 +1765,13 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 	}
 
 	if err := json.Unmarshal(decompressed, &resp); err != nil {
+		apiError()
 		return nil, fmt.Errorf("failed to parse ProfileSpotlightsQuery response: %w", err)
 	}
 
 	if len(resp.Errors) > 0 {
 		err := fmt.Errorf("ProfileSpotlightsQuery error: %s", resp.Errors[0].Message)
+		apiError()
 		// 检测 queryId 失效，自动刷新并重试一次
 		if IsQueryNotFoundError(err) {
 			logger.Warnf("ProfileSpotlightsQuery queryId 可能失效，正在刷新...")
@@ -1653,6 +1786,7 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 	}
 
 	result := &resp.Data.UserResultByScreenName.Result
+	apiSuccess()
 	return &UserProfileInfo{
 		RestID:      result.ID,
 		ScreenName:  result.Core.ScreenName,
@@ -1662,6 +1796,11 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 }
 
 func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenName string, refreshed bool) (*UserProfileInfo, error) {
+	// 等待限流器
+	if !apiWait(ctx) {
+		return nil, fmt.Errorf("aborted while waiting for rate limiter: %w", ctx.Err())
+	}
+
 	if !t.IsEnabled() {
 		return nil, errors.New("twitter API not configured with cookies")
 	}
@@ -1678,6 +1817,7 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
+	var httpCode int
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -1688,7 +1828,7 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.HeaderOption("sec-ch-ua", `"Chromium";v="135", "Not-A.Brand";v="8"`),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
 		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
 		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
 		requests.HeaderOption("sec-fetch-dest", "empty"),
@@ -1698,18 +1838,31 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 		requests.HeaderOption("Referer", fmt.Sprintf("https://x.com/%s", screenName)),
 		requests.CookieOption("ct0", t.ct0),
 		requests.CookieOption("auth_token", t.authToken),
-		requests.RetryOption(3),
+		requests.RetryOption(1), // 降低重试次数
+		requests.HttpCodeOption(&httpCode),
 	}
 
 	var rawResp []byte
 	err = requests.PostBody(apiURL, reqBytes, &rawResp, opts...)
 	if err != nil {
+		if httpCode == http.StatusTooManyRequests {
+			api429()
+			return nil, fmt.Errorf("rate limit exceeded (429)")
+		}
+		apiError()
 		return nil, fmt.Errorf("ProfileSpotlightsQuery request failed: %w", err)
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
+		apiError()
 		return nil, fmt.Errorf("decompress failed: %w", err)
+	}
+
+	// 检查是否包含429错误（HTTP 状态码或响应体）
+	if isRateLimited(httpCode, decompressed) {
+		api429()
+		return nil, fmt.Errorf("rate limit exceeded (429)")
 	}
 
 	var resp struct {
@@ -1735,14 +1888,17 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 	}
 
 	if err := json.Unmarshal(decompressed, &resp); err != nil {
+		apiError()
 		return nil, fmt.Errorf("failed to parse ProfileSpotlightsQuery response: %w", err)
 	}
 
 	if len(resp.Errors) > 0 {
+		apiError()
 		return nil, fmt.Errorf("ProfileSpotlightsQuery error: %s", resp.Errors[0].Message)
 	}
 
 	result := &resp.Data.UserResultByScreenName.Result
+	apiSuccess()
 	return &UserProfileInfo{
 		RestID:      result.ID,
 		ScreenName:  result.Core.ScreenName,

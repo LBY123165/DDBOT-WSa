@@ -17,7 +17,7 @@ const (
 
 var (
 	BaseURL     = []string{"https://nitter.tiekoetter.com/", "https://nitter.catsarch.com/"}
-	UserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36 Edg/135.0.0.0"
+	UserAgent   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 	twitterAPI  *TwitterAPI
 	TwitterMode = ModeMirror
 )
