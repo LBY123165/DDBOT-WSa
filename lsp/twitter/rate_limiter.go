@@ -21,40 +21,46 @@ var globalRateLimiter = &RateLimiter{
 
 // Wait 等待直到可以发送请求，可被 ctx 取消。
 // 返回 false 表示调用方上下文已取消（不占用请求配额）。
+// 实现采用"锁内计算等待时长 + 锁外等待"模式：持锁期间绝不睡眠，
+// 因此退避/限流等待中的 goroutine 不会阻塞其它调用方的 RecordSuccess/RecordError，
+// 也不会让锁等待者无法响应 ctx 取消。
 func (r *RateLimiter) Wait(ctx context.Context) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	for {
+		r.mu.Lock()
+		now := time.Now()
+		var wait time.Duration
 
-	now := time.Now()
-	var wait time.Duration
+		// 是否处于退避期
+		if !r.backoffUntil.IsZero() && now.Before(r.backoffUntil) {
+			wait = r.backoffUntil.Sub(now)
+		}
 
-	// 是否处于退避期
-	if !r.backoffUntil.IsZero() && now.Before(r.backoffUntil) {
-		wait = r.backoffUntil.Sub(now)
-	}
-
-	// 确保最小间隔
-	if !r.lastRequestTime.IsZero() {
-		elapsed := time.Since(r.lastRequestTime)
-		if elapsed < r.minInterval {
-			if d := r.minInterval - elapsed; d > wait {
-				wait = d
+		// 确保最小间隔
+		if !r.lastRequestTime.IsZero() {
+			elapsed := time.Since(r.lastRequestTime)
+			if elapsed < r.minInterval {
+				if d := r.minInterval - elapsed; d > wait {
+					wait = d
+				}
 			}
 		}
-	}
 
-	if wait > 0 {
+		if wait <= 0 {
+			r.lastRequestTime = time.Now()
+			r.mu.Unlock()
+			return true
+		}
+		r.mu.Unlock()
+
 		logger.Debugf("Rate limiter: waiting %v before next request", wait)
-		// 持锁等待属有意串行化；但需感知 ctx 取消，避免退避期间阻塞已取消的调用方
 		select {
 		case <-ctx.Done():
 			return false
 		case <-time.After(wait):
 		}
+		// 醒来后重新竞争锁并重算等待时长：期间其它请求可能已占用配额，
+		// 也可能退避已被 RecordSuccess 解除，以最新状态为准。
 	}
-
-	r.lastRequestTime = time.Now()
-	return true
 }
 
 // RecordSuccess 记录成功请求

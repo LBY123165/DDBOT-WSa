@@ -34,8 +34,6 @@ const (
 	queryIdCacheFile = "./res/twitter_queryids.json"
 )
 
-var queryIdMutex sync.RWMutex
-
 // QueryIdCache 保存从 LoggedInMain bundle 提取的所有 queryId
 type QueryIdCache struct {
 	UpdatedAt  time.Time         `json:"updated_at"`
@@ -101,11 +99,74 @@ func (c *QueryIdCache) IsCacheExpired() bool {
 
 // TwitterAPI handles official X.com API requests
 type TwitterAPI struct {
+	// mu 保护以下所有可变字段，防止配置刷新/queryId 更新与请求构造并发读写（data race）。
+	// 读取请使用 Snapshot/GetQueryId 等带锁方法，不要直接访问字段。
+	mu          sync.RWMutex
 	ct0         string
 	authToken   string
 	bearerToken string
 	queryId     string
 	screenName  string // Cookie账号的screenName，用于processHomeTimeline区分转发来源
+}
+
+// Snapshot 返回当前凭据与 queryId 的一致性快照，请求构造前调用一次即可安全使用。
+func (t *TwitterAPI) Snapshot() (ct0, authToken, bearerToken, queryId, screenName string) {
+	if t == nil {
+		return "", "", "", "", ""
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.ct0, t.authToken, t.bearerToken, t.queryId, t.screenName
+}
+
+// GetQueryId 返回当前 queryId（线程安全）。
+func (t *TwitterAPI) GetQueryId() string {
+	if t == nil {
+		return ""
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.queryId
+}
+
+// SetQueryId 线程安全地更新 queryId。
+func (t *TwitterAPI) SetQueryId(queryId string) {
+	if t == nil || queryId == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.queryId = queryId
+}
+
+// SetScreenName 线程安全地更新 Cookie 账号 screenName。
+func (t *TwitterAPI) SetScreenName(screenName string) {
+	if t == nil || screenName == "" {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.screenName = screenName
+}
+
+// UpdateFromConfig 从配置整体刷新凭据字段（线程安全），空值字段保持不变。
+func (t *TwitterAPI) UpdateFromConfig(ct0, authToken, bearerToken, queryId, screenName string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.ct0 = ct0
+	t.authToken = authToken
+	if bearerToken != "" {
+		t.bearerToken = bearerToken
+	}
+	if queryId != "" {
+		t.queryId = queryId
+	}
+	if screenName != "" {
+		t.screenName = screenName
+	}
 }
 
 // NewTwitterAPI creates a new TwitterAPI instance with user-provided cookies
@@ -133,7 +194,8 @@ func NewTwitterAPI(ct0, authToken, bearerToken, queryId, screenName string) *Twi
 
 // IsEnabled returns true if the API is properly configured with cookies
 func (t *TwitterAPI) IsEnabled() bool {
-	return t != nil && t.ct0 != "" && t.authToken != ""
+	ct0, authToken, _, _, _ := t.Snapshot()
+	return ct0 != "" && authToken != ""
 }
 
 // GetScreenName returns the Cookie account's screen name
@@ -141,13 +203,13 @@ func (t *TwitterAPI) GetScreenName() string {
 	if t == nil {
 		return ""
 	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return t.screenName
 }
 
 func (t *TwitterAPI) UpdateQueryId(queryId string) {
-	if queryId != "" {
-		t.queryId = queryId
-	}
+	t.SetQueryId(queryId)
 }
 
 // FetchCurrentUserScreenName fetches the current logged-in user's screenName from x.com
@@ -163,16 +225,19 @@ func (t *TwitterAPI) FetchInitialState() (screenName, mainJsUrl string, err erro
 		return "", "", errors.New("twitter API not configured")
 	}
 
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, _, _, _ := t.Snapshot()
+
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(3),
 	}
 
@@ -285,7 +350,7 @@ func RefreshAPIFromMainJS() error {
 	if err == nil && !cache.IsCacheExpired() {
 		homeId := cache.GetQueryId("HomeLatestTimeline")
 		if homeId != "" {
-			twitterAPI.queryId = homeId
+			twitterAPI.SetQueryId(homeId)
 			logger.Infof("Using cached queryId: %s (updated %v ago)", homeId, time.Since(cache.UpdatedAt))
 			return nil
 		}
@@ -312,6 +377,8 @@ func (t *TwitterAPI) FetchLoggedInMainBundleUrl() (string, error) {
 		return "", errors.New("twitter API not configured")
 	}
 
+	ct0, authToken, _, _, _ := t.Snapshot()
+
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
@@ -320,8 +387,8 @@ func (t *TwitterAPI) FetchLoggedInMainBundleUrl() (string, error) {
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
 		requests.HeaderOption("Referer", "https://x.com/"),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(3),
 	}
 
@@ -363,11 +430,9 @@ func refreshAPIWithBundleUrl(bundleUrl string) error {
 		logger.Infof("QueryId cache saved to %s (%d operations)", queryIdCacheFile, len(cache.Operations))
 	}
 
-	// 更新 twitterAPI 的 queryId（加锁防止并发写入）
+	// 更新 twitterAPI 的 queryId（线程安全）
 	if homeId := cache.GetQueryId("HomeLatestTimeline"); homeId != "" {
-		queryIdMutex.Lock()
-		twitterAPI.queryId = homeId
-		queryIdMutex.Unlock()
+		twitterAPI.SetQueryId(homeId)
 		logger.Infof("HomeLatestTimeline queryId: %s", homeId)
 	} else {
 		logger.Warn("HomeLatestTimeline queryId not found in cache")
@@ -393,7 +458,7 @@ func RefreshQueryIdForce() error {
 	if err := refreshAPIWithBundleUrl(bundleUrl); err != nil {
 		return err
 	}
-	logger.Infof("QueryId refreshed successfully: %s", twitterAPI.queryId)
+	logger.Infof("QueryId refreshed successfully: %s", twitterAPI.GetQueryId())
 	return nil
 }
 
@@ -474,17 +539,8 @@ func RefreshTwitterAPIFromConfig() {
 	screenName := config.GlobalConfig.GetString("twitter.screenName")
 
 	if twitterAPI != nil {
-		twitterAPI.ct0 = ct0
-		twitterAPI.authToken = authToken
-		if bearerToken != "" {
-			twitterAPI.bearerToken = bearerToken
-		}
-		if queryId != "" {
-			twitterAPI.queryId = queryId
-		}
-		if screenName != "" {
-			twitterAPI.screenName = screenName
-		}
+		// 统一走带锁的更新方法，避免与请求构造并发读写造成 data race
+		twitterAPI.UpdateFromConfig(ct0, authToken, bearerToken, queryId, screenName)
 	} else {
 		twitterAPI = NewTwitterAPI(ct0, authToken, bearerToken, queryId, screenName)
 	}
@@ -502,7 +558,7 @@ func AutoFetchScreenName() error {
 		return fmt.Errorf("failed to fetch screenName: %w", err)
 	}
 
-	twitterAPI.screenName = screenName
+	twitterAPI.SetScreenName(screenName)
 	logger.Infof("Auto-fetched Cookie account screenName: %s", screenName)
 	return nil
 }
@@ -807,10 +863,8 @@ func (t *TwitterAPI) HomeTimeline(ctx context.Context, cursor string) (*HomeTime
 		ResponsiveWebEnhanceCardsEnabled:                               false,
 	}
 
-	// 加锁读取 queryId，防止刷新时与其他请求冲突
-	queryIdMutex.RLock()
-	currentQueryId := t.queryId
-	queryIdMutex.RUnlock()
+	// 线程安全读取 queryId，防止刷新时与其他请求冲突
+	currentQueryId := t.GetQueryId()
 
 	apiURL := fmt.Sprintf("%s/%s/HomeLatestTimeline", TwitterGraphQLAPI, currentQueryId)
 
@@ -849,7 +903,7 @@ func (t *TwitterAPI) HomeTimeline(ctx context.Context, cursor string) (*HomeTime
 		if IsQueryNotFoundError(err) {
 			logger.Warnf("QueryId 可能失效，正在刷新...")
 			if refreshErr := RefreshQueryIdForce(); refreshErr == nil {
-				logger.Infof("QueryId 已刷新为 %s，重试 HomeTimeline...", twitterAPI.queryId)
+				logger.Infof("QueryId 已刷新为 %s，重试 HomeTimeline...", twitterAPI.GetQueryId())
 				return twitterAPI.homeTimelineWithRefresh(ctx, cursor, true)
 			} else {
 				logger.Warnf("QueryId 刷新失败: %v", refreshErr)
@@ -919,10 +973,8 @@ func (t *TwitterAPI) homeTimelineWithRefresh(ctx context.Context, cursor string,
 		ResponsiveWebEnhanceCardsEnabled:                               false,
 	}
 
-	// 加锁读取 queryId，防止刷新时与其他请求冲突
-	queryIdMutex.RLock()
-	currentQueryId := t.queryId
-	queryIdMutex.RUnlock()
+	// 线程安全读取 queryId，防止刷新时与其他请求冲突
+	currentQueryId := t.GetQueryId()
 
 	apiURL := fmt.Sprintf("%s/%s/HomeLatestTimeline", TwitterGraphQLAPI, currentQueryId)
 
@@ -961,7 +1013,7 @@ func (t *TwitterAPI) homeTimelineWithRefresh(ctx context.Context, cursor string,
 		if !refreshed && IsQueryNotFoundError(err) {
 			logger.Warnf("QueryId 可能失效，正在刷新...")
 			if refreshErr := RefreshQueryIdForce(); refreshErr == nil {
-				logger.Infof("QueryId 已刷新为 %s，重试 HomeTimeline...", twitterAPI.queryId)
+				logger.Infof("QueryId 已刷新为 %s，重试 HomeTimeline...", twitterAPI.GetQueryId())
 				return t.homeTimelineWithRefresh(ctx, cursor, true)
 			} else {
 				logger.Warnf("QueryId 刷新失败: %v", refreshErr)
@@ -984,12 +1036,14 @@ func (t *TwitterAPI) doPost(ctx context.Context, apiURL string, body []byte, out
 	}
 
 	var httpCode int
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := t.Snapshot()
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+t.bearerToken),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("content-type", "application/json"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "en-US,en;q=0.9"),
@@ -1002,8 +1056,8 @@ func (t *TwitterAPI) doPost(ctx context.Context, apiURL string, body []byte, out
 		requests.HeaderOption("sec-fetch-site", "same-origin"),
 		requests.HeaderOption("Referer", "https://x.com/home"),
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1), // 降低重试次数，避免被识别为机器人
 		requests.HttpCodeOption(&httpCode),
 	}
@@ -1058,12 +1112,14 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 	}
 
 	var httpCode int
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := t.Snapshot()
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+t.bearerToken),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "en-US,en;q=0.9"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
@@ -1075,8 +1131,8 @@ func (t *TwitterAPI) doGet(ctx context.Context, apiURL string, req HomeTimelineR
 		requests.HeaderOption("sec-fetch-site", "same-origin"),
 		requests.HeaderOption("Referer", "https://x.com/home"),
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1), // 降低重试次数，避免被识别为机器人
 		requests.HttpCodeOption(&httpCode),
 	}
@@ -1126,7 +1182,7 @@ func decompressResponse(data []byte) ([]byte, error) {
 		return decompressGzip(data)
 	case data[0] == 0x78 && (data[1] == 0x9c || data[1] == 0xda || data[1] == 0x01):
 		return decompressDeflate(data)
-	case data[0] == 0xce && data[1] == 0xb2 && data[2] == 0xcf && data[3] == 0xfa:
+	case len(data) >= 4 && data[0] == 0xce && data[1] == 0xb2 && data[2] == 0xcf && data[3] == 0xfa:
 		return decompressBrotli(data)
 	default:
 		return data, nil
@@ -1584,12 +1640,14 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 	)
 
 	var httpCode int
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := t.Snapshot()
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+t.bearerToken),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("content-type", "application/x-www-form-urlencoded"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
@@ -1602,8 +1660,8 @@ func (t *TwitterAPI) followUnfollow(ctx context.Context, userId, action string) 
 		requests.HeaderOption("sec-fetch-site", "same-origin"),
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
 		requests.HeaderOption("X-Twitter-Auth-Type", "OAuth2Session"),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1), // 降低重试次数
 		requests.HttpCodeOption(&httpCode),
 	}
@@ -1699,12 +1757,14 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 	}
 
 	var httpCode int
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := t.Snapshot()
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+t.bearerToken),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("content-type", "application/json"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
@@ -1718,8 +1778,8 @@ func (t *TwitterAPI) GetUserByScreenName(ctx context.Context, screenName string)
 		requests.HeaderOption("X-Twitter-Active-User", "yes"),
 		requests.HeaderOption("X-Twitter-Auth-Type", "OAuth2Session"),
 		requests.HeaderOption("Referer", fmt.Sprintf("https://x.com/%s", screenName)),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1), // 降低重试次数
 		requests.HttpCodeOption(&httpCode),
 	}
@@ -1823,12 +1883,14 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 	}
 
 	var httpCode int
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := t.Snapshot()
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 30),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+t.bearerToken),
-		requests.HeaderOption("x-csrf-token", t.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("content-type", "application/json"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
@@ -1841,8 +1903,8 @@ func (t *TwitterAPI) getUserByScreenNameWithRefresh(ctx context.Context, screenN
 		requests.HeaderOption("sec-fetch-site", "same-origin"),
 		requests.HeaderOption("X-Twitter-Auth-Type", "OAuth2Session"),
 		requests.HeaderOption("Referer", fmt.Sprintf("https://x.com/%s", screenName)),
-		requests.CookieOption("ct0", t.ct0),
-		requests.CookieOption("auth_token", t.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1), // 降低重试次数
 		requests.HttpCodeOption(&httpCode),
 	}

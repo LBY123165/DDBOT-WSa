@@ -409,6 +409,12 @@ func (t *twitterConcern) processUsers(ctx context.Context, eventChan chan<- conc
 // groupCode<=0 表示拉取所有订阅用户
 func (t *twitterConcern) processUsersInGroup(ctx context.Context, eventChan chan<- concern.Event, groupCode int64) {
 	if IsTwitterEnabled() {
+		// HomeTimeline 是账号首页的全量时间线，无法按群过滤。
+		// 手动刷新指定群时明确提示，避免用户误以为只拉了本群
+		if groupCode > 0 {
+			logger.WithField("groupCode", groupCode).
+				Info("API 模式手动刷新为全量 HomeTimeline 拉取（无法按群过滤），推送侧按订阅关系分发")
+		}
 		t.processHomeTimeline(ctx, eventChan)
 		return
 	}
