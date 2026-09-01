@@ -147,15 +147,23 @@ func writeConfigKeyValueToPath(key, value, cfgPath string) error {
 
 	newData := []byte(strings.Join(out, "\n"))
 
-	// 使用临时文件 + 原子替换，避免写入中途崩溃导致配置损坏
+	// 使用临时文件 + 原子替换，避免写入中途崩溃导致配置损坏。
+	// Windows 上目标文件可能被编辑器/杀毒软件瞬时占用，rename 会失败，
+	// 因此做几次退避重试，重试仍失败才返回错误（不会损坏原文件）。
 	tmpFile := cfgPath + ".tmp"
 	if err := os.WriteFile(tmpFile, newData, fileMode); err != nil {
 		return fmt.Errorf("写入临时文件失败: %w", err)
 	}
-	if err := os.Rename(tmpFile, cfgPath); err != nil {
-		_ = os.Remove(tmpFile)
-		return fmt.Errorf("原子替换配置文件失败: %w", err)
+	const maxRenameRetries = 3
+	var renameErr error
+	for attempt := 0; attempt < maxRenameRetries; attempt++ {
+		renameErr = os.Rename(tmpFile, cfgPath)
+		if renameErr == nil {
+			return nil
+		}
+		// 短暂退避后重试（200ms 起，最多约 800ms）
+		time.Sleep(time.Duration(200*(1<<attempt)) * time.Millisecond)
 	}
-
-	return nil
+	_ = os.Remove(tmpFile)
+	return fmt.Errorf("原子替换配置文件失败（已重试 %d 次）: %w", maxRenameRetries, renameErr)
 }
