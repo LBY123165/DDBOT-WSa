@@ -1309,6 +1309,11 @@ func (t *TwitterAPI) parseRetweetEntry(result *TweetResult) *Tweet {
 	}
 
 	if original.Legacy != nil {
+		// 启用 twitter.retweetFullText 时，使用原推文的完整文本而不是转发者的截断文本
+		// （X 的 retweet full_text 仅含 "RT @user: " + 原文前140字符）
+		if getRetweetFullTextEnabled() {
+			tweet.Content = original.Legacy.FullText
+		}
 		tweet.CreatedAt = parseTwitterDate(result.Legacy.CreatedAt)
 		tweet.TranslationLang = original.Legacy.Lang // 转发推文使用原始推文的语言
 		if original.Legacy.ExtendedEntities != nil && len(original.Legacy.ExtendedEntities.Media) > 0 {

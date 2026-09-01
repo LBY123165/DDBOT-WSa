@@ -374,6 +374,16 @@ func (t *twitterConcern) notifyGenerator() concern.NotifyGeneratorFunc {
 	}
 }
 
+// getRetweetFullTextEnabled 是否在转发推文中显示原推文完整文本。
+// 关闭（默认）时沿用 X API 的截断摘要（"RT @user: " + 前140字符），
+// 开启时以原推文完整内容替换。
+func getRetweetFullTextEnabled() bool {
+	if config.GlobalConfig != nil {
+		return config.GlobalConfig.GetBool("twitter.retweetFullText")
+	}
+	return false
+}
+
 // 新增辅助函数获取刷新间隔
 // 始终强制 120s 下限（降低封号/限速风险），用户配置小于该值时提醒并采信下限
 func getRefreshInterval() time.Duration {
