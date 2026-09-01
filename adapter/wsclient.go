@@ -2,11 +2,13 @@ package adapter
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -204,13 +206,17 @@ func (c *WSClient) startServer() error {
 	if addr == "" {
 		addr = "0.0.0.0:15630"
 	}
+	// 安全修复：token 为空时拒绝启动 ws-server，避免 0.0.0.0 上出现无鉴权的远程控制端口
+	if c.token == "" {
+		wsLogger.Errorf("ws-server 模式必须配置非空 websocket.token 才能启动 (addr=%s)：空 token 允许任意客户端接入并控制机器人", addr)
+		return errors.New("ws-server mode requires a non-empty token")
+	}
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		if c.token != "" {
-			auth := r.Header.Get("Authorization")
-			if auth == "" || strings.TrimPrefix(auth, "Bearer ") != c.token {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
+		// 兼容 "Bearer <token>" 与裸 token 两种形式，均做常量时间比较防时序攻击
+		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(auth), []byte(c.token)) != 1 {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
 		upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 		conn, err := upgrader.Upgrade(w, r, nil)
@@ -420,7 +426,15 @@ func (c *WSClient) readLoop(conn *websocket.Conn, errChan chan error) {
 				return
 			}
 		}
-		go c.handleMessage(message)
+		// 安全修复：handler 调用链中任何 panic 不再击穿整个进程
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					wsLogger.Errorf("handleMessage panic (recovered): %v\n%s", r, debug.Stack())
+				}
+			}()
+			c.handleMessage(message)
+		}()
 	}
 }
 
