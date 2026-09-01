@@ -1,9 +1,11 @@
 package twitter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -224,15 +226,16 @@ func translateWithXAPI(ctx context.Context, tweetID string) *TranslationResult {
 			logger.Debug("X translation API rate limited (429)")
 			return nil
 		}
-		apiError()
-		logger.WithError(err).Debug("X translation API request failed")
+		// 不调用 apiError()：翻译端点失败不代表 GraphQL 抓取被封，
+		// 计入全局退避会连累正常的 HomeTimeline 抓取
+		logger.WithField("TweetId", tweetID).WithError(err).
+			Warnf("X 官方翻译 API 请求失败（HTTP %d）", httpCode)
 		return nil
 	}
 
 	decompressed, err := decompressResponse(rawResp)
 	if err != nil {
-		apiError()
-		logger.WithError(err).Debug("Failed to decompress X translation response")
+		logger.WithField("TweetId", tweetID).WithError(err).Warn("X 翻译响应解压失败")
 		return nil
 	}
 
@@ -243,33 +246,55 @@ func translateWithXAPI(ctx context.Context, tweetID string) *TranslationResult {
 		return nil
 	}
 
-	// 解析响应: {"result":{"content_type":"POST","text":"翻译结果","entities":{}}}
-	var resp struct {
-		Result struct {
-			ContentType string `json:"content_type"`
-			Text        string `json:"text"`
-		} `json:"result"`
+	// 解析响应：X 翻译 API 返回的是流式多段 JSON，每段形如
+	// {"result":{"content_type":"POST","text":"片段","entities":{}}}
+	// 需逐个解码并把 text 片段拼接为完整译文
+	var (
+		resp struct {
+			Result struct {
+				ContentType string `json:"content_type"`
+				Text        string `json:"text"`
+			} `json:"result"`
+		}
+		translated strings.Builder
+	)
+
+	dec := json.NewDecoder(bytes.NewReader(decompressed))
+	for {
+		if err := dec.Decode(&resp); err != nil {
+			if err == io.EOF {
+				break
+			}
+			logger.WithField("TweetId", tweetID).WithError(err).
+				Warnf("X 翻译响应解析失败: %s", truncateBody(decompressed))
+			return nil
+		}
+		translated.WriteString(resp.Result.Text)
 	}
 
-	if err := json.Unmarshal(decompressed, &resp); err != nil {
-		apiError()
-		logger.WithError(err).Debug("Failed to parse X translation response")
-		return nil
-	}
-
-	if resp.Result.Text == "" {
-		apiError()
+	if translated.Len() == 0 {
+		logger.WithField("TweetId", tweetID).
+			Warnf("X 翻译返回空文本: %s", truncateBody(decompressed))
 		return nil
 	}
 
 	apiSuccess()
 	logger.Debugf("X API translation successful for tweet %s", tweetID)
 	return &TranslationResult{
-		TranslatedText: resp.Result.Text,
+		TranslatedText: translated.String(),
 		SourceLang:     "auto",
 		TargetLang:     getTranslateTargetLang(),
 		Method:         "x_api",
 	}
+}
+
+// truncateBody 截断响应体用于日志，避免超长内容刷屏
+func truncateBody(body []byte) string {
+	const maxLen = 500
+	if len(body) > maxLen {
+		return string(body[:maxLen]) + "..."
+	}
+	return string(body)
 }
 
 // translateWithGoogle uses Google Translate API (unofficial)
@@ -278,9 +303,21 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 		return nil
 	}
 
-	// Google Translate unofficial API endpoint
-	apiURL := "https://translate.googleapis.com/translate_a/single"
+	// 主端点受限流时回退到备用端点
+	endpoints := []string{
+		"https://translate.googleapis.com/translate_a/single",
+		"https://translate.google.com/translate_a/single",
+	}
+	for _, endpoint := range endpoints {
+		if result := googleTranslateRequest(endpoint, text, sourceLang, targetLang); result != nil {
+			return result
+		}
+	}
+	return nil
+}
 
+// googleTranslateRequest 请求单个 Google 翻译端点
+func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *TranslationResult {
 	params := url.Values{}
 	params.Set("client", "gtx")
 	params.Set("sl", sourceLang)
@@ -288,7 +325,7 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 	params.Set("dt", "t")
 	params.Set("q", text)
 
-	fullURL := fmt.Sprintf("%s?%s", apiURL, params.Encode())
+	fullURL := fmt.Sprintf("%s?%s", endpoint, params.Encode())
 
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
@@ -296,24 +333,31 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 		requests.AddUAOption(UserAgent),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
-		requests.RetryOption(2),
+		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
+		requests.HeaderOption("sec-ch-ua", `"Chromium";v="149", "Not)A;Brand";v="24"`),
+		requests.HeaderOption("sec-ch-ua-mobile", "?0"),
+		requests.HeaderOption("sec-ch-ua-platform", `"Windows"`),
+		requests.HeaderOption("Referer", "https://translate.google.com/"),
+		requests.HeaderOption("Origin", "https://translate.google.com"),
+		requests.RetryOption(1),
 	}
 
 	var resp []byte
 	err := requests.Get(fullURL, nil, &resp, opts...)
 	if err != nil {
-		logger.WithError(err).Debug("Google Translate API request failed")
+		logger.WithError(err).Warnf("Google Translate API 请求失败(%s): %s", endpoint, truncateBody(resp))
 		return nil
 	}
 
 	// Parse response: [[["translated text","original text",null,null,10]],null,"en"]
 	var result []interface{}
 	if err := json.Unmarshal(resp, &result); err != nil {
-		logger.WithError(err).Debug("Failed to parse Google Translate response")
+		logger.WithError(err).Warnf("Google Translate 响应解析失败: %s", truncateBody(resp))
 		return nil
 	}
 
 	if len(result) == 0 {
+		logger.Warnf("Google Translate 返回空结果: %s", truncateBody(resp))
 		return nil
 	}
 

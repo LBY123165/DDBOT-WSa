@@ -109,6 +109,10 @@ func (t *StateManager) MarkTweetId(tweetId string) (replaced bool, err error) {
 type twitterConcern struct {
 	*StateManager
 	homeTimelineCursor string // 保存 HomeTimeline 翻页 cursor
+
+	// manualRefreshCh 手动刷新触发通道，值为目标群代码（0 表示全部）
+	// 由 RefreshCommand 等外部命令触发，实现"强制拉取最新并重置计时"
+	manualRefreshCh chan int64
 }
 
 func (t *twitterConcern) Site() string {
@@ -388,12 +392,23 @@ func getRefreshInterval() time.Duration {
 }
 
 func (t *twitterConcern) processUsers(ctx context.Context, eventChan chan<- concern.Event) {
+	t.processUsersInGroup(ctx, eventChan, 0)
+}
+
+// processUsersInGroup 拉取指定群订阅用户的推文。
+// groupCode<=0 表示拉取所有订阅用户
+func (t *twitterConcern) processUsersInGroup(ctx context.Context, eventChan chan<- concern.Event, groupCode int64) {
 	if IsTwitterEnabled() {
 		t.processHomeTimeline(ctx, eventChan)
 		return
 	}
 
-	_, ids, _, _ := t.StateManager.ListConcernState(func(g int64, id interface{}, p concern_type.Type) bool { return p.ContainAll(Tweets) })
+	_, ids, _, _ := t.StateManager.ListConcernState(func(g int64, id interface{}, p concern_type.Type) bool {
+		if groupCode > 0 && g != groupCode {
+			return false
+		}
+		return p.ContainAll(Tweets)
+	})
 	for _, userId := range ids {
 		if ctx.Err() != nil {
 			return
@@ -484,13 +499,23 @@ func (t *twitterConcern) fresh() concern.FreshFunc {
 		ti := time.NewTimer(time.Second * 3)
 		defer ti.Stop() // 确保定时器资源释放
 
+		// reset 按 interval+随机抖动重置定时器，供定时与手动刷新共用
+		reset := func() {
+			// 添加随机抖动，避免固定间隔被识别为机器人
+			jitter := time.Duration(rand.Intn(30)) * time.Second // 0-30秒随机抖动
+			ti.Reset(interval + jitter)
+		}
+
 		for {
 			select {
 			case <-ti.C:
 				t.processUsers(ctx, eventChan)
-				// 添加随机抖动，避免固定间隔被识别为机器人
-				jitter := time.Duration(rand.Intn(30)) * time.Second // 0-30秒随机抖动
-				ti.Reset(interval + jitter)
+				reset()
+			case groupCode := <-t.manualRefreshCh:
+				// 手动触发：立即强制拉取该群订阅用户的最新推文，并重置计时
+				logger.WithField("groupCode", groupCode).Info("收到手动刷新指令，强制拉取最新推文")
+				t.processUsersInGroup(ctx, eventChan, groupCode)
+				reset()
 			case <-ctx.Done():
 				return
 			}
@@ -640,8 +665,39 @@ func (t *twitterConcern) GetStateManager() concern.IStateManager {
 	return t.StateManager
 }
 
+// TriggerManualRefresh 手动触发刷新：向 fresh 循环发送信号。
+// groupCode<=0 表示刷新全部订阅；>0 表示仅刷新该群订阅的用户。
+// 返回非 nil 表示触发失败（如通道已满/尚未初始化）。
+func (t *twitterConcern) TriggerManualRefresh(groupCode int64) error {
+	if t == nil || t.manualRefreshCh == nil {
+		return errors.New("twitter concern 未初始化，无法手动刷新")
+	}
+	select {
+	case t.manualRefreshCh <- groupCode:
+		return nil
+	default:
+		return errors.New("已有手动刷新在进行中，请稍后重试")
+	}
+}
+
+// ManualRefresh 外部命令入口：按 site 获取 twitter concern 并触发手动刷新。
+// groupCode<=0 表示刷新全部订阅；>0 表示仅刷新该群订阅的用户。
+func ManualRefresh(groupCode int64) error {
+	c, err := concern.GetConcernBySite(Site)
+	if err != nil {
+		return err
+	}
+	tc, ok := c.(*twitterConcern)
+	if !ok {
+		return errors.New("twitter concern 类型断言失败")
+	}
+	return tc.TriggerManualRefresh(groupCode)
+}
+
 func newConcern(notifyChan chan<- concern.Notify) *twitterConcern {
-	con := &twitterConcern{}
+	con := &twitterConcern{
+		manualRefreshCh: make(chan int64, 8),
+	}
 	// 默认是string格式的id
 	con.StateManager = &StateManager{StateManager: concern.NewStateManagerWithStringID(Site, notifyChan), concern: con, ExtraKey: NewExtraKey()}
 	// 如果要使用int64格式的id，可以用下面的
