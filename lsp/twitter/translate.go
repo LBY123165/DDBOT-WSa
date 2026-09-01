@@ -303,10 +303,11 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 		return nil
 	}
 
-	// 主端点受限流时回退到备用端点
+	// 端点按可用性排序：dict-chrome-ex 风控最宽松，主端点被限流时回退其余
 	endpoints := []string{
-		"https://translate.googleapis.com/translate_a/single",
-		"https://translate.google.com/translate_a/single",
+		"https://clients5.google.com/translate_a/t?client=dict-chrome-ex",
+		"https://translate.googleapis.com/translate_a/single?client=gtx",
+		"https://translate.google.com/translate_a/single?client=gtx",
 	}
 	for _, endpoint := range endpoints {
 		if result := googleTranslateRequest(endpoint, text, sourceLang, targetLang); result != nil {
@@ -319,13 +320,12 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 // googleTranslateRequest 请求单个 Google 翻译端点
 func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *TranslationResult {
 	params := url.Values{}
-	params.Set("client", "gtx")
 	params.Set("sl", sourceLang)
 	params.Set("tl", targetLang)
-	params.Set("dt", "t")
 	params.Set("q", text)
+	params.Set("dt", "t")
 
-	fullURL := fmt.Sprintf("%s?%s", endpoint, params.Encode())
+	fullURL := fmt.Sprintf("%s&%s", endpoint, params.Encode())
 
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
@@ -349,10 +349,19 @@ func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *Tran
 		return nil
 	}
 
-	// Parse response: [[["translated text","original text",null,null,10]],null,"en"]
+	// 响应可能为 gzip/deflate/br 压缩，需要解压后才能解析 JSON
+	decompressed, err := decompressResponse(resp)
+	if err != nil {
+		logger.WithField("endpoint", endpoint).WithError(err).Warn("Google Translate 响应解压失败")
+		return nil
+	}
+
+	// 解析响应。可能格式：
+	// 1. dict-chrome-ex: [["译文","en"]]
+	// 2. gtx: [[["译文片段","原文",...]],null,"en"]
 	var result []interface{}
-	if err := json.Unmarshal(resp, &result); err != nil {
-		logger.WithError(err).Warnf("Google Translate 响应解析失败: %s", truncateBody(resp))
+	if err := json.Unmarshal(decompressed, &result); err != nil {
+		logger.WithError(err).Warnf("Google Translate 响应解析失败: %s", truncateBody(decompressed))
 		return nil
 	}
 
@@ -361,32 +370,46 @@ func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *Tran
 		return nil
 	}
 
-	// Extract translated text
 	translations, ok := result[0].([]interface{})
 	if !ok || len(translations) == 0 {
 		return nil
 	}
 
+	var translatedText string
+	var sourceLangDetected string
 	var translatedParts []string
-	for _, item := range translations {
-		if part, ok := item.([]interface{}); ok && len(part) > 0 {
-			if partSeg, ok := part[0].(string); ok {
-				translatedParts = append(translatedParts, partSeg)
+
+	// dict-chrome-ex 格式：translations[0] 是字符串译文，translations[1] 是源语言
+	if first, ok := translations[0].(string); ok {
+		translatedText = first
+		if len(translations) > 1 {
+			if lang, ok := translations[1].(string); ok {
+				sourceLangDetected = lang
+			}
+		}
+	} else {
+		// gtx 格式：translations 是 [译文, 原文, ...] 片段数组
+		for _, item := range translations {
+			if part, ok := item.([]interface{}); ok && len(part) > 0 {
+				if partSeg, ok := part[0].(string); ok {
+					translatedParts = append(translatedParts, partSeg)
+				}
+			}
+		}
+		translatedText = strings.Join(translatedParts, "")
+		if len(result) > 2 {
+			if lang, ok := result[2].(string); ok {
+				sourceLangDetected = lang
 			}
 		}
 	}
 
-	translatedText := strings.Join(translatedParts, "")
 	if translatedText == "" {
 		return nil
 	}
 
-	// Detect source language
-	sourceLangDetected := "unknown"
-	if len(result) > 2 {
-		if lang, ok := result[2].(string); ok {
-			sourceLangDetected = lang
-		}
+	if sourceLangDetected == "" {
+		sourceLangDetected = "unknown"
 	}
 
 	logger.Debugf("Google Translate successful: %s -> %s", sourceLangDetected, targetLang)
