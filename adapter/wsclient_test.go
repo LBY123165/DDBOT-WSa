@@ -338,11 +338,13 @@ func TestWSClient_StartServer(t *testing.T) {
 	_ = c.Stop()
 }
 
-// Test ws-server mode without token is rejected (security requirement)
-func TestWSClient_StartServer_WithoutTokenRejected(t *testing.T) {
+// Test ws-server mode without token: allowed to start (per user request),
+// runs in unauthenticated mode with a warning logged
+func TestWSClient_StartServer_WithoutTokenAllowed(t *testing.T) {
 	c := newTestWSClient("onebot-v11", WSModeServer, "127.0.0.1:15634")
 	err := c.Start()
-	assert.Error(t, err, "ws-server must refuse to start without a token")
+	require.NoError(t, err, "ws-server without token should be allowed to start (unauthenticated mode)")
+	time.Sleep(100 * time.Millisecond) // Give server time to start
 	_ = c.Stop()
 }
 

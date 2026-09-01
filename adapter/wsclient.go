@@ -206,17 +206,19 @@ func (c *WSClient) startServer() error {
 	if addr == "" {
 		addr = "0.0.0.0:15630"
 	}
-	// 安全修复：token 为空时拒绝启动 ws-server，避免 0.0.0.0 上出现无鉴权的远程控制端口
+	// 按用户要求解除"空 token 拒绝启动"的限制：允许无鉴权启动，
+	// 但保留醒目告警，提示此时任何能访问该端口的客户端都可接入并控制机器人
 	if c.token == "" {
-		wsLogger.Errorf("ws-server 模式必须配置非空 websocket.token 才能启动 (addr=%s)：空 token 允许任意客户端接入并控制机器人", addr)
-		return errors.New("ws-server mode requires a non-empty token")
+		wsLogger.Warnf("ws-server 模式未配置 websocket.token，将以无鉴权方式启动 (addr=%s)：任意客户端均可接入并控制机器人，建议配置 token", addr)
 	}
 	handler := func(w http.ResponseWriter, r *http.Request) {
-		// 兼容 "Bearer <token>" 与裸 token 两种形式，均做常量时间比较防时序攻击
-		auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(auth), []byte(c.token)) != 1 {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
+		// 配置了 token 时校验：兼容 "Bearer <token>" 与裸 token 两种形式，常量时间比较防时序攻击
+		if c.token != "" {
+			auth := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if subtle.ConstantTimeCompare([]byte(auth), []byte(c.token)) != 1 {
+				http.Error(w, "Unauthorized", http.StatusUnauthorized)
+				return
+			}
 		}
 		upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 		conn, err := upgrader.Upgrade(w, r, nil)
