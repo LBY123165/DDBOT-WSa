@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,15 +25,15 @@ type TranslationResult struct {
 }
 
 // getTranslationBatchWait 返回推送渲染时等待单条预翻译结果的兜底时长。
-// 可经 twitter.translate.batchWait（秒）配置；默认对齐翻译最小间隔 + 网络请求耗时预算，
-// 覆盖同一批推文中第 2~3 条的翻译，而不是像此前固定 3s 那样只放行第 1 条。
+// 可经 twitter.translate.batchWait（秒）配置；默认按"同批前 2 条可完成"估算：
+// 两条翻译的最小间隔（minInterval×2）+ 网络请求耗时预算。
 func getTranslationBatchWait() time.Duration {
 	if config.GlobalConfig != nil {
 		if v := config.GlobalConfig.GetDuration("twitter.translate.batchWait"); v > 0 {
 			return v
 		}
 	}
-	return getTranslateMinInterval() + networkRequestBudget
+	return getTranslateMinInterval()*2 + networkRequestBudget
 }
 
 // networkRequestBudget 一次翻译请求的网络往返预留时长
@@ -43,21 +42,28 @@ const networkRequestBudget = 10 * time.Second
 // StartAsyncTranslate 在 fetch 阶段异步预翻译推文（正文与引用，如适用）。
 // 结果通过 tweet.translationCh 送达，推送阶段调用 WaitTranslation 读取缓存，
 // 避免在 GetMSG 推送路径上同步执行网络翻译阻塞管线。
+// 每个翻译 goroutine 持有与 batchWait 对齐的 deadline：等待限流窗口超时即放弃，
+// 避免任务堆积，且不会在推送放弃后继续占用翻译配额。
 func StartAsyncTranslate(tweet *Tweet) {
 	if tweet == nil || !IsTranslateEnabled() {
 		return
 	}
+	startOne := func(id, content string, ch chan *TranslationResult) {
+		// 与 WaitTranslation 的 batchWait 对齐：推送只会等这么久，
+		// 超时未轮到就退出，不再排队占用限流窗口
+		ctx, cancel := context.WithTimeout(context.Background(), getTranslationBatchWait())
+		go func() {
+			defer cancel()
+			ch <- TranslateTweet(ctx, id, content)
+		}()
+	}
 	if ShouldTranslate(tweet.Content, tweet.TranslationLang) {
 		tweet.translationCh = make(chan *TranslationResult, 1)
-		go func(id, content string, ch chan *TranslationResult) {
-			ch <- TranslateTweet(context.Background(), id, content)
-		}(tweet.ID, tweet.Content, tweet.translationCh)
+		startOne(tweet.ID, tweet.Content, tweet.translationCh)
 	}
 	if qt := tweet.QuoteTweet; qt != nil && ShouldTranslate(qt.Content, qt.TranslationLang) {
 		qt.translationCh = make(chan *TranslationResult, 1)
-		go func(id, content string, ch chan *TranslationResult) {
-			ch <- TranslateTweet(context.Background(), id, content)
-		}(qt.ID, qt.Content, qt.translationCh)
+		startOne(qt.ID, qt.Content, qt.translationCh)
 	}
 }
 
@@ -84,6 +90,8 @@ var (
 // waitForTranslateSlot 等待翻译限流窗口。
 // 与旧版"间隔不足直接丢弃"不同，这里会阻塞等待直到窗口到来（可被 ctx 取消），
 // 保证连续多次翻译调用都能获得配额而不是静默丢弃。
+// 若调用方 deadline 已不足以覆盖等待时长，立即返回 false 快速失败，
+// 避免超时任务继续占用后续批次的时间窗口。
 func waitForTranslateSlot(ctx context.Context) bool {
 	for {
 		translateMu.Lock()
@@ -96,6 +104,11 @@ func waitForTranslateSlot(ctx context.Context) bool {
 		}
 		remaining := minInterval - elapsed
 		translateMu.Unlock()
+
+		// 剩余等待时间超过调用方 deadline 时直接放弃（快速失败）
+		if deadline, ok := ctx.Deadline(); ok && time.Now().Add(remaining).After(deadline) {
+			return false
+		}
 
 		select {
 		case <-time.After(remaining):
@@ -191,12 +204,15 @@ func translateWithXAPI(ctx context.Context, tweetID string) *TranslationResult {
 		return nil
 	}
 
+	// 取一致性快照，避免并发配置刷新导致 header 撕裂
+	ct0, authToken, bearerToken, _, _ := twitterAPI.Snapshot()
+
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 10),
 		requests.AddUAOption(UserAgent),
-		requests.HeaderOption("authorization", "Bearer "+twitterAPI.bearerToken),
-		requests.HeaderOption("x-csrf-token", twitterAPI.ct0),
+		requests.HeaderOption("authorization", "Bearer "+bearerToken),
+		requests.HeaderOption("x-csrf-token", ct0),
 		requests.HeaderOption("content-type", "text/plain;charset=UTF-8"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
@@ -212,8 +228,8 @@ func translateWithXAPI(ctx context.Context, tweetID string) *TranslationResult {
 		requests.HeaderOption("X-Twitter-Client-Language", "zh-cn"),
 		requests.HeaderOption("Origin", "https://x.com"),
 		requests.HeaderOption("Referer", "https://x.com/"),
-		requests.CookieOption("ct0", twitterAPI.ct0),
-		requests.CookieOption("auth_token", twitterAPI.authToken),
+		requests.CookieOption("ct0", ct0),
+		requests.CookieOption("auth_token", authToken),
 		requests.RetryOption(1),
 		requests.HttpCodeOption(&httpCode),
 	}
@@ -288,13 +304,15 @@ func translateWithXAPI(ctx context.Context, tweetID string) *TranslationResult {
 	}
 }
 
-// truncateBody 截断响应体用于日志，避免超长内容刷屏
+// truncateBody 截断响应体用于日志，避免超长内容刷屏。
+// 按 rune 截断，避免把多字节字符切成非法 UTF-8。
 func truncateBody(body []byte) string {
 	const maxLen = 500
-	if len(body) > maxLen {
-		return string(body[:maxLen]) + "..."
+	runes := []rune(string(body))
+	if len(runes) > maxLen {
+		return string(runes[:maxLen]) + "..."
 	}
-	return string(body)
+	return string(runes)
 }
 
 // translateWithGoogle uses Google Translate API (unofficial)
@@ -318,19 +336,26 @@ func translateWithGoogle(text, sourceLang, targetLang string) *TranslationResult
 }
 
 // googleTranslateRequest 请求单个 Google 翻译端点
+// 使用 POST 表单提交文本，避免推文全文进入 URL（超长 URL 会被拒且内容会泄露到代理/访问日志）。
 func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *TranslationResult {
-	params := url.Values{}
-	params.Set("sl", sourceLang)
-	params.Set("tl", targetLang)
-	params.Set("q", text)
-	params.Set("dt", "t")
+	// Google 单次翻译长度上限约 5000 字符，超长按 rune 截断（按字节截断会把
+	// 多字节字符切成非法 UTF-8，导致请求内容乱码），避免请求被整体拒绝
+	const maxTextLen = 5000
+	if runes := []rune(text); len(runes) > maxTextLen {
+		text = string(runes[:maxTextLen])
+	}
 
-	fullURL := fmt.Sprintf("%s&%s", endpoint, params.Encode())
+	form := url.Values{}
+	form.Set("sl", sourceLang)
+	form.Set("tl", targetLang)
+	form.Set("q", text)
+	form.Set("dt", "t")
 
 	opts := []requests.Option{
 		requests.ProxyOption(proxy_pool.PreferOversea),
 		requests.TimeoutOption(time.Second * 10),
 		requests.AddUAOption(UserAgent),
+		requests.HeaderOption("content-type", "application/x-www-form-urlencoded"),
 		requests.HeaderOption("Accept", "*/*"),
 		requests.HeaderOption("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8"),
 		requests.HeaderOption("Accept-Encoding", "gzip, deflate, br"),
@@ -343,7 +368,7 @@ func googleTranslateRequest(endpoint, text, sourceLang, targetLang string) *Tran
 	}
 
 	var resp []byte
-	err := requests.Get(fullURL, nil, &resp, opts...)
+	err := requests.PostBody(endpoint, []byte(form.Encode()), &resp, opts...)
 	if err != nil {
 		logger.WithError(err).Warnf("Google Translate API 请求失败(%s): %s", endpoint, truncateBody(resp))
 		return nil
