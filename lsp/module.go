@@ -181,6 +181,11 @@ func (l *Lsp) Init() {
 	}
 
 	proxyType := config.GlobalConfig.GetString("proxy.type")
+	// 未配置 proxy.type 时默认使用 systemProxy：自动检测系统代理（环境变量/GNOME/Windows 注册表）
+	if proxyType == "" {
+		proxyType = "systemProxy"
+		log.Info("未配置 proxy.type，默认使用 systemProxy（自动检测系统代理）")
+	}
 	log = logger.WithField("proxy_type", proxyType)
 	switch proxyType {
 	case "pyProxyPool":
@@ -228,7 +233,11 @@ func (l *Lsp) Init() {
 			proxy_pool.Init(pool)
 			l.status.ProxyPoolEnable = true
 		} else {
-			log.Warn("未检测到系统代理或系统代理未启用")
+			log.Warn("未检测到系统代理或系统代理未启用。" +
+				"检测范围：环境变量(http_proxy/https_proxy/all_proxy)、Linux GNOME 系统代理(gsettings)、Windows 注册表。" +
+				"注意：代理客户端仅监听端口不代表系统代理已开启；" +
+				"终端直接运行可先 export https_proxy=http://127.0.0.1:端口 再启动，" +
+				"或在配置中改用静态代理（proxy.oversea 等条目）")
 		}
 	case "off":
 		log.Debug("proxy pool turn off")

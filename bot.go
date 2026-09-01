@@ -160,7 +160,7 @@ bot:
 
 # 代理配置：X / YouTube / 翻译等海外请求需要海外代理
 # 可选类型：
-#   systemProxy: 自动检测系统代理（Windows 注册表 / Linux 环境变量）
+#   systemProxy: 自动检测系统代理（Windows 注册表 / Linux 环境变量 / GNOME 系统代理），默认值
 #   localProxyPool: 手动配置代理池（下方的 localProxyPool 段）
 #   pyProxyPool: Python 代理池（下方的 pyProxyPool 段）
 #   off: 不使用代理
@@ -444,12 +444,10 @@ extDb:
 
 # Telegram 推送设置
 # 启用后，可在 Telegram 中进行所有操作（命令与 QQ 一致）
+# Telegram 请求走全局代理池（proxy.type = systemProxy 时自动使用系统代理），无需单独配置
 telegram:
   enable: false            # 是否启用 Telegram
   token: ""                # Telegram Bot Token
-  proxy:
-    enable: false         # 是否启用代理（http/https/socks5/socks5h）
-    url: ""               # 代理地址，例如 http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080
   endpoint: ""            # 可选：自定义 Telegram API Endpoint，留空使用默认
 
 `
