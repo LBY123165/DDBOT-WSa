@@ -8,7 +8,10 @@ import (
 )
 
 const (
-	PathGetAttentionList = "/feed/v1/feed/get_attention_list"
+	// PathGetAttentionList 旧的 /feed/v1/feed/get_attention_list 已被 B 站下线（HTTP 404），
+	// 改用 relation/followings/simple：它把当前账号的全部关注直接以 UID 数组返回，
+	// data.list 的结构与旧接口完全一致，因此响应结构体可以继续复用。
+	PathGetAttentionList = "/x/relation/followings/simple"
 )
 
 func GetAttentionList() (*GetAttentionListResponse, error) {
@@ -30,8 +33,9 @@ func GetAttentionList() (*GetAttentionListResponse, error) {
 	)
 	opts = append(opts, GetVerifyOption()...)
 	getAttentionListResp := new(GetAttentionListResponse)
+	// simple 接口不理会分页参数，一次返回全部关注，无需翻页
 	err := requests.Get(url, map[string]interface{}{
-		"uid": accountUid.String(),
+		"vmid": accountUid.String(),
 	}, getAttentionListResp, opts...)
 	if err != nil {
 		return nil, err

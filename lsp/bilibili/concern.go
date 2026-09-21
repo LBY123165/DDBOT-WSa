@@ -532,14 +532,16 @@ func (c *Concern) FindUserNews(mid int64, load bool) (*NewsInfo, error) {
 	var newsInfo *NewsInfo
 
 	if load {
-		history, err := DynamicSrvSpaceHistory(mid)
+		// 旧的 space_history 已下线，改用网页新版空间动态接口
+		resp, err := WebDynamicFeedSpace(mid, "")
 		if err != nil {
 			return nil, err
 		}
-		if history.Code != 0 {
-			return nil, fmt.Errorf("code:%v %v", history.Code, history.Message)
+		if resp.GetCode() != 0 {
+			return nil, fmt.Errorf("code:%v %v", resp.GetCode(), resp.GetMessage())
 		}
-		newsInfo = NewNewsInfoWithDetail(userInfo, history.GetData().GetCards())
+		cards := polymerItemsToCards(resp.GetData().GetItems())
+		newsInfo = NewNewsInfoWithDetail(userInfo, cards)
 		_ = c.StateManager.AddNewsInfo(newsInfo)
 	}
 	if newsInfo != nil {
