@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net/http/cookiejar"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -384,21 +385,80 @@ func getRetweetFullTextEnabled() bool {
 	return false
 }
 
-// 新增辅助函数获取刷新间隔
-// 始终强制 120s 下限（降低封号/限速风险），用户配置小于该值时提醒并采信下限
+// twitterRefreshIntervalDefault 未配置 twitter.interval 时的默认刷新间隔。
+// 取 120s 是为了降低 X 的限流/封号风险。
+const twitterRefreshIntervalDefault = 120 * time.Second
+
+// getRefreshInterval 获取推文刷新间隔。
+//
+// 语义：只有「未配置」twitter.interval 时才使用默认 120s；
+// 显式配置的值一律按配置生效——即使低于建议下限也只告警提示，不静默钳制/降级到 120s。
 func getRefreshInterval() time.Duration {
-	minInterval := time.Second * 120
 	if config.GlobalConfig != nil {
-		interval := config.GlobalConfig.GetDuration("twitter.interval")
-		if interval > 0 {
-			if interval < minInterval {
-				logger.Warnf("twitter.interval=%v 低于下限 120s，已强制采用 120s", interval)
-				return minInterval
+		if interval := parseInterval(config.GlobalConfig.Get("twitter.interval")); interval > 0 {
+			if interval < twitterRefreshIntervalDefault {
+				logger.Warnf("twitter.interval=%v 低于建议下限 %v，已按配置值生效；间隔过短可能触发 X 限流甚至封禁",
+					interval, twitterRefreshIntervalDefault)
 			}
 			return interval
 		}
 	}
-	return minInterval // 默认120秒，降低请求频率
+	return twitterRefreshIntervalDefault
+}
+
+// parseInterval 解析 twitter.interval 配置，返回 0 表示「未配置或无法解析」，由调用方取默认值。
+//
+// 支持带单位的字符串（"2m"、"90s"）与数字；数字按「秒」解释。
+// 注意不要直接用 GetDuration：无单位数字会被 viper 当成纳秒，
+// 例如 twitter.interval: 60 会解析成 60ns，等于把限流彻底取消。
+func parseInterval(raw interface{}) time.Duration {
+	switch v := raw.(type) {
+	case nil:
+		return 0
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0
+		}
+		if d, err := time.ParseDuration(s); err == nil {
+			if d <= 0 {
+				return 0
+			}
+			return d
+		}
+		// 容忍纯数字字符串（如 "60"），按秒解释
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return secondsToDuration(n)
+		}
+		logger.Warnf("twitter.interval=%q 无法解析（请使用如 120s / 2m 的格式），将使用默认值 %v",
+			v, twitterRefreshIntervalDefault)
+		return 0
+	case int:
+		return secondsToDuration(float64(v))
+	case int32:
+		return secondsToDuration(float64(v))
+	case int64:
+		return secondsToDuration(float64(v))
+	case uint:
+		return secondsToDuration(float64(v))
+	case uint64:
+		return secondsToDuration(float64(v))
+	case float32:
+		return secondsToDuration(float64(v))
+	case float64:
+		return secondsToDuration(v)
+	default:
+		logger.Warnf("twitter.interval 类型不支持（%T），将使用默认值 %v", raw, twitterRefreshIntervalDefault)
+		return 0
+	}
+}
+
+// secondsToDuration 把按「秒」解释的数值转成 Duration；非正数返回 0，表示未配置。
+func secondsToDuration(seconds float64) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds * float64(time.Second))
 }
 
 func (t *twitterConcern) processUsers(ctx context.Context, eventChan chan<- concern.Event) {
