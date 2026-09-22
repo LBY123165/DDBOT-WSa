@@ -607,6 +607,90 @@ func mergeConfig(baseCfg, newCfg map[string]interface{}) {
 	}
 }
 
+// writeFileAtomic 以「临时文件 + rename」方式写入配置文件。
+// 配置热重载由 fsnotify 监听，直接 os.WriteFile 会被读到只写了一半的内容；
+// 原子替换同时也保证写入失败时磁盘上仍是完整的旧配置。
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if tmpName != "" {
+			_ = os.Remove(tmpName) // 失败路径清理临时文件；成功 rename 后 tmpName 会被置空
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	tmpName = ""
+	return nil
+}
+
+// configValueUnset 判断配置值是否等价于「未设置」（nil / 空字符串）
+func configValueUnset(v interface{}) bool {
+	if v == nil {
+		return true
+	}
+	if s, ok := v.(string); ok {
+		return s == ""
+	}
+	return false
+}
+
+// collectConfigWriteViolations 递归比较「请求写入的配置」与「现有配置」，
+// 返回被拒绝修改的键路径：受保护键（protectedConfigKeys）或敏感键，且值确实发生了变化。
+// 只拦截真正发生变化的键，因此 GET 返回的脱敏占位符、原样回传的未修改值都不会被误判，
+// 也不会因为类型差异（yaml int 与 json float64）产生误报。
+func collectConfigWriteViolations(existing, updated map[string]interface{}, prefix string) []string {
+	var violations []string
+	for k, newVal := range updated {
+		key := k
+		if prefix != "" {
+			key = prefix + "." + k
+		}
+		if newMap, ok := newVal.(map[string]interface{}); ok {
+			existingMap, _ := existing[k].(map[string]interface{})
+			violations = append(violations, collectConfigWriteViolations(existingMap, newMap, key)...)
+			continue
+		}
+		if !protectedConfigKeys[key] && !isSensitiveKey(k) {
+			continue
+		}
+		// 与 mergeConfig 保持一致：脱敏占位符代表「未修改」，merge 时会被跳过
+		if s, ok := newVal.(string); ok && s == redactedPlaceholder {
+			continue
+		}
+		oldUnset := configValueUnset(existing[k])
+		newUnset := configValueUnset(newVal)
+		if oldUnset && newUnset {
+			continue // 新旧都是未设置状态，视为未修改
+		}
+		if !oldUnset && !newUnset && fmt.Sprintf("%v", existing[k]) == fmt.Sprintf("%v", newVal) {
+			continue // 值未变化
+		}
+		violations = append(violations, key)
+	}
+	return violations
+}
+
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -642,6 +726,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			_ = yaml.Unmarshal(data, &existing)
 		}
 
+		// 安全：整体写同样要挡掉受保护键/敏感键（admin.token、websocket.token 等），
+		// 否则可以绕过 handleConfigKey 的单键校验，靠整体 merge 落盘 token 提权或留下后门。
+		if violations := collectConfigWriteViolations(existing, req.Config, ""); len(violations) > 0 {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "protected or sensitive config keys cannot be modified via API: " + strings.Join(violations, ", "),
+			})
+			return
+		}
+
 		mergeConfig(existing, req.Config)
 
 		data, err := yaml.Marshal(existing)
@@ -658,7 +752,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if err := os.WriteFile("application.yaml", data, 0600); err != nil {
+		if err := writeFileAtomic("application.yaml", data, 0600); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to write config file"})
 			return
@@ -773,7 +867,7 @@ func (s *Server) handleConfigKey(w http.ResponseWriter, r *http.Request) {
 		if err := os.WriteFile("application.yaml.bak", oldData, 0600); err != nil {
 			logrus.Warnf("配置备份失败: %v", err)
 		}
-		if err := os.WriteFile("application.yaml", data, 0600); err != nil {
+		if err := writeFileAtomic("application.yaml", data, 0600); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to write config file"})
 			return
