@@ -570,9 +570,11 @@ func (m *Messenger) buildMessageSegments(msg *SendingMessage) []MessageSegment {
 }
 
 // isSingleElement 判断是否为独立发送类型（必须单独发送，不能与其他元素混合）
+// json 卡片不可切分，且 buildMessageChunks 没有对应的分片分支，
+// 若不放进来会被静默丢弃，因此这里一并单独发送。
 func isSingleElement(segment MessageSegment) bool {
 	switch segment.Type {
-	case "video", "file", "record", "forward":
+	case "video", "file", "record", "forward", "json":
 		return true
 	}
 	return false
