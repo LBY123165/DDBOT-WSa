@@ -2276,6 +2276,12 @@ func TestConnectionStress_RapidReconnect(t *testing.T) {
 	wsClient.url = wsURL
 	wsClient.maxReconnect = 100
 
+	// 基线必须在本测试启动前现取，不能写死绝对值：
+	// 包内稳态 goroutine 数在 48~50 之间，且随平台（Windows/Linux）与运行间有 ±1 波动，
+	// 原先断言 final < 50 等于骑在阈值上，CI 上取到 50 就必然失败（与测试本身是否泄漏无关）。
+	// 这里改为与本测试自身的基线比较，只关注「反复重连是否泄漏」，与同文件其它 goroutine 断言写法一致。
+	initialGoroutines := runtime.NumGoroutine()
+
 	startTime := time.Now()
 	err := wsClient.Start()
 	require.NoError(t, err)
@@ -2284,12 +2290,24 @@ func TestConnectionStress_RapidReconnect(t *testing.T) {
 
 	wsClient.Stop()
 
+	// 等待重连/心跳 goroutine 与 httptest 的连接处理 goroutine 退出后再判定
+	var finalGoroutines int
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		finalGoroutines = runtime.NumGoroutine()
+		if finalGoroutines <= initialGoroutines || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
 	t.Logf("Reconnect count: %d", reconnectCount)
 	t.Logf("Duration: %v", time.Since(startTime))
-	t.Logf("Final goroutines: %d", runtime.NumGoroutine())
+	t.Logf("Initial goroutines: %d, Final goroutines: %d", initialGoroutines, finalGoroutines)
 
-	finalGoroutines := runtime.NumGoroutine()
-	assert.Less(t, finalGoroutines, 50, "Possible goroutine leak: %d goroutines", finalGoroutines)
+	// 允许极小波动，但不应出现随重连次数增长的泄漏
+	assert.LessOrEqual(t, finalGoroutines, initialGoroutines+5,
+		"Possible goroutine leak: initial=%d final=%d", initialGoroutines, finalGoroutines)
 }
 
 // TestCalcWriteWait 测试 calcWriteWait 函数的计算逻辑（参考 NapCat/LLOneBot 实现）
