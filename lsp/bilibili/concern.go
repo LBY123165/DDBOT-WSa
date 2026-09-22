@@ -462,6 +462,13 @@ func (c *Concern) SyncSub() {
 		attentionMidSet[attentionMid] = true
 	}
 
+	// 兜底：simple 接口的「一次返回全部关注」是未确认的假设；
+	// 列表若被截断，midSet 中「实际已关注但不在列表里」的目标会被误判为未关注，
+	// 从而触发一批不必要的自动关注。条数对不上时直接放弃本次同步。
+	if !verifyAttentionListComplete(len(resp.GetData().GetList())) {
+		return
+	}
+
 	var disableSub = false
 	if config.GlobalConfig.GetBool("bilibili.disableSub") {
 		disableSub = true
