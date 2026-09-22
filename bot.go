@@ -423,12 +423,13 @@ adapter:
 
 # ws 模式支持 ws-server（正向）和 ws-reverse（反向）
 # token 是服务端设置的 Access Token
-# ws-server 默认监听全部请求，如需限制请修改为指定 ip:端口
+# ws-server 默认只监听本机回环地址 127.0.0.1:15630；
+#   未配置 token 时仅允许监听回环地址，若改为 0.0.0.0 或其他网卡/公网地址则必须配置 token
 # ws-reverse 需要配合反向 ws 服务器使用，默认为 LLOneBot 地址
 websocket:
   mode: ws-server
   token:
-  ws-server: 0.0.0.0:15630
+  ws-server: 127.0.0.1:15630
   ws-reverse: ws://localhost:3001
 admin:
   enable: false

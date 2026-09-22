@@ -338,14 +338,104 @@ func TestWSClient_StartServer(t *testing.T) {
 	_ = c.Stop()
 }
 
-// Test ws-server mode without token: allowed to start (per user request),
-// runs in unauthenticated mode with a warning logged
-func TestWSClient_StartServer_WithoutTokenAllowed(t *testing.T) {
+// Test ws-server mode without token on a loopback address:
+// allowed to start (unauthenticated, reachable from this machine only)
+func TestWSClient_StartServer_WithoutTokenLoopbackAllowed(t *testing.T) {
 	c := newTestWSClient("onebot-v11", WSModeServer, "127.0.0.1:15634")
 	err := c.Start()
-	require.NoError(t, err, "ws-server without token should be allowed to start (unauthenticated mode)")
+	require.NoError(t, err, "loopback ws-server without token should be allowed to start")
 	time.Sleep(100 * time.Millisecond) // Give server time to start
 	_ = c.Stop()
+}
+
+// Test ws-server mode without token on a non-loopback address:
+// must refuse to start, otherwise an unauthenticated control port would be exposed
+func TestWSClient_StartServer_WithoutTokenNonLoopbackRejected(t *testing.T) {
+	addrs := []string{
+		"0.0.0.0:15635",
+		"[::]:15635",
+		"192.168.1.10:15635",
+		"localhost:15635",
+		"example.com:15635",
+		"15635",
+	}
+	for _, addr := range addrs {
+		c := newTestWSClient("onebot-v11", WSModeServer, addr)
+		err := c.Start()
+		assert.Error(t, err, "non-loopback ws-server without token must refuse to start (addr=%q)", addr)
+		if err != nil {
+			assert.Contains(t, err.Error(), "non-loopback")
+		}
+		_ = c.Stop()
+	}
+
+	// 空地址会落到默认的 127.0.0.1:15630（回环），属于安全默认值，允许无 token 启动
+	c := newTestWSClient("onebot-v11", WSModeServer, "")
+	require.NoError(t, c.Start(), "empty addr falls back to loopback default and should be allowed")
+	_ = c.Stop()
+}
+
+// Test isLoopbackAddr classification: only real loopback IPs count,
+// hostnames that cannot be parsed as IP are treated as non-loopback
+func TestIsLoopbackAddr(t *testing.T) {
+	loopback := []string{
+		"127.0.0.1:15630",
+		"127.0.0.2:15630", // 127.0.0.0/8 全部为回环
+		"127.255.255.254:1",
+		"[::1]:15630",
+	}
+	nonLoopback := []string{
+		"0.0.0.0:15630",
+		"[::]:15630",
+		"192.168.1.10:15630",
+		"8.8.8.8:15630",
+		"localhost:15630",
+		"example.com:15630",
+		"15630",
+		"",
+	}
+	for _, addr := range loopback {
+		assert.True(t, isLoopbackAddr(addr), "expected loopback: %q", addr)
+	}
+	for _, addr := range nonLoopback {
+		assert.False(t, isLoopbackAddr(addr), "expected non-loopback: %q", addr)
+	}
+
+	// 默认监听地址必须本身是回环地址，否则空 token 时会拒绝启动
+	assert.True(t, isLoopbackAddr(defaultWSServerAddr),
+		"defaultWSServerAddr must be loopback so that empty token can still start locally")
+}
+
+// Test CheckOrigin: browser requests must be same-origin, non-browser clients (no Origin) pass
+func TestWSClient_ServerCheckOrigin(t *testing.T) {
+	c := newTestWSClient("onebot-v11", WSModeServer, "127.0.0.1:15639",
+		WithWSToken("test-token"))
+	require.NoError(t, c.Start())
+	defer c.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	// 跨源浏览器请求必须被拒绝
+	header := http.Header{
+		"Authorization": []string{"Bearer test-token"},
+		"Origin":        []string{"http://evil.example"},
+	}
+	_, resp, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:15639", header)
+	assert.Error(t, err, "cross-origin browser request must be rejected")
+	if resp != nil {
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode)
+	}
+
+	// 同源 Origin 允许
+	header.Set("Origin", "http://127.0.0.1:15639")
+	conn, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:15639", header)
+	require.NoError(t, err)
+	conn.Close()
+
+	// 非浏览器客户端（无 Origin）允许
+	header.Del("Origin")
+	conn2, _, err := websocket.DefaultDialer.Dial("ws://127.0.0.1:15639", header)
+	require.NoError(t, err)
+	conn2.Close()
 }
 
 // Test ws-server mode with token authentication

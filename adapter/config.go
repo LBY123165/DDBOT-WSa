@@ -47,11 +47,12 @@ func getWSAddr() string {
 	}
 
 	if wsMode == WSModeServer {
-		addr := config.GlobalConfig.GetString("websocket.ws-server")
-		if addr == "" {
-			addr = "0.0.0.0:15630"
-		}
-		return addr
+	addr := config.GlobalConfig.GetString("websocket.ws-server")
+	if addr == "" {
+		// 默认仅监听本机回环：未配置 token 时不会把无鉴权控制端口暴露到局域网/公网
+		addr = defaultWSServerAddr
+	}
+	return addr
 	}
 
 	addr := config.GlobalConfig.GetString("websocket.ws-reverse")
