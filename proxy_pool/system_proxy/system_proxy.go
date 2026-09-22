@@ -8,7 +8,14 @@ import (
 // 平台相关实现拆分到 detect_windows.go（Windows：注册表）与 detect_other.go（Linux/macOS：环境变量），
 // 避免在非 Windows 平台导入 golang.org/x/sys/windows/registry 导致构建失败。
 func DetectSystemProxy() (proxy string, enabled bool) {
-	return detectSystemProxy()
+	proxy, _, enabled = detectSystemProxyWithSource()
+	return proxy, enabled
+}
+
+// DetectSystemProxyWithSource 与 DetectSystemProxy 相同，但额外返回代理来源说明，
+// 便于日志中交代「代理是从哪发现的」（环境变量 / GNOME / Windows 注册表）。
+func DetectSystemProxyWithSource() (proxy, source string, enabled bool) {
+	return detectSystemProxyWithSource()
 }
 
 // parseProxyAddress 解析代理地址（支持多种格式）

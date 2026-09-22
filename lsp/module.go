@@ -220,9 +220,9 @@ func (l *Lsp) Init() {
 		l.status.ProxyPoolEnable = true
 	case "systemProxy":
 		// 自动检测系统代理，仅用于海外请求（X、YouTube 等）
-		sysProxy, enabled := system_proxy.DetectSystemProxy()
+		sysProxy, sysProxySource, enabled := system_proxy.DetectSystemProxyWithSource()
 		if enabled && sysProxy != "" {
-			log.Infof("检测到系统代理: %s（仅用于海外请求）", sysProxy)
+			log.Infof("检测到系统代理: %s（来源: %s，仅用于海外请求）", sysProxy, sysProxySource)
 			proxies := []*local_proxy_pool.Proxy{
 				{
 					Type:  proxy_pool.PreferOversea,
@@ -237,7 +237,8 @@ func (l *Lsp) Init() {
 				"检测范围：环境变量(http_proxy/https_proxy/all_proxy)、Linux GNOME 系统代理(gsettings)、Windows 注册表。" +
 				"注意：代理客户端仅监听端口不代表系统代理已开启；" +
 				"终端直接运行可先 export https_proxy=http://127.0.0.1:端口 再启动，" +
-				"或在配置中改用静态代理（proxy.oversea 等条目）")
+				"或在配置中改用静态代理（proxy.oversea 等条目）；" +
+				"如需显式关闭代理检测（例如不希望自动使用环境变量里的代理），可设置 proxy.type: off")
 		}
 	case "off":
 		log.Debug("proxy pool turn off")

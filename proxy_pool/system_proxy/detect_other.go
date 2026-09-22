@@ -10,34 +10,37 @@ import (
 	"strings"
 )
 
-func detectSystemProxy() (proxy string, enabled bool) {
-	// 1) 环境变量优先（http_proxy/https_proxy/all_proxy，大小写均检查）
-	if p, ok := detectEnvProxy(); ok && p != "" {
-		return p, true
+// detectSystemProxyWithSource 检测系统代理并返回来源说明。
+// 顺序：环境变量（http_proxy/https_proxy/all_proxy，大小写均检查）优先，
+// 其次 Linux GNOME 桌面代理设置（gsettings）。
+func detectSystemProxyWithSource() (proxy, source string, enabled bool) {
+	if p, envVar, ok := detectEnvProxy(); ok && p != "" {
+		return p, "环境变量 " + envVar, true
 	}
 
-	// 2) Linux GNOME 桌面代理设置（gsettings，Ubuntu 桌面"设置-网络-网络代理"写入的位置）
+	// Linux GNOME 桌面代理设置（gsettings，Ubuntu 桌面"设置-网络-网络代理"写入的位置）
 	if runtime.GOOS == "linux" {
 		if p := detectGnomeProxy(); p != "" {
-			return p, true
+			return p, "Linux GNOME 系统代理(gsettings)", true
 		}
 	}
 
-	return "", false
+	return "", "", false
 }
 
-// detectEnvProxy 从环境变量读取代理设置（Linux/macOS 通用）
-func detectEnvProxy() (proxy string, enabled bool) {
+// detectEnvProxy 从环境变量读取代理设置（Linux/macOS 通用），
+// 返回值中的 envVar 为命中的环境变量名，用于日志中说明来源。
+func detectEnvProxy() (proxy, envVar string, enabled bool) {
 	// 按优先级检查环境变量
 	envVars := []string{"https_proxy", "HTTPS_PROXY", "http_proxy", "HTTP_PROXY", "all_proxy", "ALL_PROXY"}
 
-	for _, envVar := range envVars {
-		if value := os.Getenv(envVar); value != "" {
-			return normalizeProxyURL(value), true
+	for _, env := range envVars {
+		if value := os.Getenv(env); value != "" {
+			return normalizeProxyURL(value), env, true
 		}
 	}
 
-	return "", false
+	return "", "", false
 }
 
 // gsettingsGet 读取 gsettings 键值，返回去引号后的字符串；gsettings 不存在或键不存在时返回空串。

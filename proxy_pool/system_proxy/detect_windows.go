@@ -4,8 +4,13 @@ package system_proxy
 
 import "golang.org/x/sys/windows/registry"
 
-func detectSystemProxy() (proxy string, enabled bool) {
-	return detectWindowsProxy()
+// detectSystemProxyWithSource 检测系统代理并返回来源说明（Windows：注册表 Internet Settings）
+func detectSystemProxyWithSource() (proxy, source string, enabled bool) {
+	p, ok := detectWindowsProxy()
+	if !ok || p == "" {
+		return "", "", false
+	}
+	return p, "Windows 注册表(Internet Settings)", true
 }
 
 // detectWindowsProxy 从 Windows 注册表读取代理设置
